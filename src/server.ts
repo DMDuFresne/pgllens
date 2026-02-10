@@ -614,27 +614,56 @@ export async function startServer(): Promise<void> {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ProveIT MES - Authorization</title>
+  <title>PgLLens - Authorization</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Commissioner:wght@400;700&family=Exo:wght@500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Commissioner:wght@400;700&family=Exo:wght@500&display=swap" rel="stylesheet"></noscript>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    body { font-family: 'Commissioner', Arial, sans-serif;
            display: flex; justify-content: center; align-items: center; height: 100vh;
-           margin: 0; background: #1a1a2e; color: #eee; }
-    .container { background: #16213e; padding: 2rem; border-radius: 8px;
-                 box-shadow: 0 4px 20px rgba(0,0,0,0.3); width: 320px; }
-    h1 { margin: 0 0 0.5rem 0; font-size: 1.5rem; color: #4ecca3; }
-    p { margin: 0 0 1.5rem 0; color: #888; font-size: 0.9rem; }
-    input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #333;
-            border-radius: 4px; background: #0f0f23; color: #eee; box-sizing: border-box; }
-    button { width: 100%; padding: 0.75rem; background: #4ecca3; color: #1a1a2e;
-             border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-    button:hover { background: #3db892; }
-    .error { color: #ff6b6b; margin-bottom: 1rem; font-size: 0.9rem; }
+           margin: 0; background: #252525; color: #fff; }
+    .container { background: #1e1e1e; padding: 2.5rem; border-radius: 8px;
+                 box-shadow: 0 4px 24px rgba(0,0,0,0.4); width: 340px;
+                 border-top: 3px solid; border-image: linear-gradient(90deg, #D4FDB1, #B3E6E1) 1; }
+    .brand { text-align: center; margin-bottom: 1.5rem; }
+    .brand h1 { margin: 0; font-size: 1.6rem; font-weight: 700; color: #fff; }
+    .brand h1 span { background: linear-gradient(90deg, #D4FDB1, #B3E6E1);
+                     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                     background-clip: text; }
+    .subtitle { font-family: 'Exo', Arial, sans-serif; font-weight: 500;
+                text-transform: uppercase; letter-spacing: 0.075em;
+                font-size: 0.7rem; color: #888; margin: 0.5rem 0 0 0; }
+    p { margin: 0 0 1.5rem 0; color: #999; font-size: 0.9rem; text-align: center; }
+    label { font-family: 'Exo', Arial, sans-serif; font-weight: 500;
+            text-transform: uppercase; letter-spacing: 0.075em;
+            font-size: 0.7rem; color: #888; display: block; margin-bottom: 0.4rem; }
+    input[type="password"] { width: 100%; padding: 0.75rem; margin-bottom: 1.25rem;
+            border: 1px solid #3a3a3a; border-radius: 4px; background: #252525;
+            color: #fff; box-sizing: border-box; font-family: 'Commissioner', Arial, sans-serif;
+            font-size: 0.95rem; transition: border-color 0.2s; }
+    input[type="password"]:focus { outline: none; border-color: #B3E6E1; }
+    button { width: 100%; padding: 0.75rem; border: none; border-radius: 4px;
+             cursor: pointer; font-weight: 700; font-size: 0.95rem;
+             font-family: 'Commissioner', Arial, sans-serif;
+             background: linear-gradient(90deg, #D4FDB1, #B3E6E1); color: #252525;
+             transition: opacity 0.2s; }
+    button:hover { opacity: 0.88; }
+    .error { color: #F5602B; margin-bottom: 1rem; font-size: 0.85rem; text-align: center; }
+    .footer { text-align: center; margin-top: 1.5rem; }
+    .footer a { font-family: 'Exo', Arial, sans-serif; font-weight: 500;
+                text-transform: uppercase; letter-spacing: 0.075em;
+                font-size: 0.65rem; color: #555; text-decoration: none; }
+    .footer a:hover { color: #B3E6E1; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>🔐 ProveIT MES</h1>
-    <p>Enter password to authorize MCP access</p>
+    <div class="brand">
+      <h1><span>PgLLens</span></h1>
+      <p class="subtitle">MCP Authorization</p>
+    </div>
+    <p>Enter password to continue</p>
     ${error ? `<div class="error">${error}</div>` : ''}
     <form method="POST">
       <input type="hidden" name="redirect_uri" value="${redirect_uri || ''}" />
@@ -642,9 +671,13 @@ export async function startServer(): Promise<void> {
       <input type="hidden" name="client_id" value="${client_id || ''}" />
       <input type="hidden" name="code_challenge" value="${code_challenge || ''}" />
       <input type="hidden" name="code_challenge_method" value="${code_challenge_method || ''}" />
-      <input type="password" name="password" placeholder="Password" autofocus required />
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="Enter passphrase" autofocus required />
       <button type="submit">Authorize</button>
     </form>
+    <div class="footer">
+      <a href="https://abelara.com" target="_blank" rel="noopener">Abelara</a>
+    </div>
   </div>
 </body>
 </html>`;

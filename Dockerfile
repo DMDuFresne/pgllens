@@ -1,9 +1,9 @@
 # =============================================================================
-# ProveIT MES MCP Server - Multi-stage Dockerfile
+# PgLLens - Multi-stage Dockerfile
 # =============================================================================
-# Build: docker build -t proveit-mes-mcp-server .
-# Run:   docker run -p 3000:3000 -e DATABASE_URL="..." proveit-mes-mcp-server
-# OAuth: docker run -p 3000:3000 -e DATABASE_URL="..." proveit-mes-mcp-server --oauth
+# Build: docker build -t pgllens .
+# Run:   docker run -p 3000:3000 -e DATABASE_URL="..." pgllens
+# OAuth: docker run -p 3000:3000 -e DATABASE_URL="..." pgllens --oauth
 # =============================================================================
 
 # -----------------------------------------------------------------------------

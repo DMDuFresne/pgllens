@@ -1,0 +1,31 @@
+services:
+  pgllens:
+    build: .
+    image: dmdufresne/pgllens:latest
+    container_name: pgllens
+    ports:
+      - "${MCP_PORT:-3000}:3000"
+    command: ["node", "dist/index.js", "--oauth"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MCP_PORT: "3000"
+      EXPOSED_SCHEMAS: ${EXPOSED_SCHEMAS:-public}
+      QUERY_TIMEOUT_MS: ${QUERY_TIMEOUT_MS:-30000}
+      MAX_ROWS: ${MAX_ROWS:-1000}
+      SCHEMA_REFRESH_INTERVAL_MS: ${SCHEMA_REFRESH_INTERVAL_MS:-300000}
+      DOMAIN_CONTEXT_FILE: ${DOMAIN_CONTEXT_FILE:-}
+      DOMAIN_CONTEXT: ${DOMAIN_CONTEXT:-}
+      MCP_AUTH_PASSWORD: ${MCP_AUTH_PASSWORD:-change-me}
+      EXTERNAL_BASE_URL: ${EXTERNAL_BASE_URL:-}
+      MCP_OAUTH_TOKEN_EXPIRES_IN: ${MCP_OAUTH_TOKEN_EXPIRES_IN:-604800}
+      MCP_RATE_LIMIT_ATTEMPTS: ${MCP_RATE_LIMIT_ATTEMPTS:-5}
+      MCP_RATE_LIMIT_WINDOW_MS: ${MCP_RATE_LIMIT_WINDOW_MS:-900000}
+    volumes:
+      - ./context.md:/app/context.md:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped

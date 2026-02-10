@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * ProveIT MES MCP Server
+ * PgLLens MCP Server
  *
- * A custom Model Context Protocol server that provides rich schema documentation
- * and read-only query access to the ProveIT MES TimescaleDB database.
+ * A self-documenting PostgreSQL MCP server that provides rich schema documentation
+ * and read-only query access to any PostgreSQL database.
  *
  * Usage:
  *   npm start              - Run with .env file

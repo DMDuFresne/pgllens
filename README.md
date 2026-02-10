@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="images/Abelara_Icons_RGB-03.png" alt="PgLLens" width="120">
+
 # PgLLens
 
 ### Give AI Eyes on Your Database
@@ -47,7 +49,7 @@ AI models are powerful — but they're blind to your database. They don't know y
 
 ```bash
 # Clone and install
-git clone https://github.com/abelara/pgllens.git
+git clone https://github.com/DMDuFresne/pgllens.git
 cd pgllens
 npm install
 
@@ -67,7 +69,7 @@ PgLLens is now running at `http://localhost:3000` with the MCP endpoint at `/mcp
 ```bash
 docker run -p 3000:3000 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/mydb" \
-  abelara/pgllens:latest
+  dmdufresne/pgllens:latest
 ```
 
 ### Connect to Claude Desktop
@@ -234,7 +236,7 @@ docker run -p 3000:3000 \
 ```yaml
 services:
   pgllens:
-    image: abelara/pgllens:latest
+    image: dmdufresne/pgllens:latest
     ports:
       - "3000:3000"
     environment:
@@ -268,7 +270,7 @@ PgLLens implements defense-in-depth to protect your database:
 
 All queries are scanned for dangerous keywords **before execution**. The following operations are blocked at the application level, regardless of database permissions:
 
-`INSERT` · `UPDATE` · `DELETE` · `DROP` · `ALTER` · `TRUNCATE` · `CREATE` · `GRANT` · `REVOKE` · `EXECUTE` · `COPY` · `IMPORT` · `VACUUM` · `REINDEX` · `CLUSTER` · `LOCK`
+`INSERT` · `UPDATE` · `DELETE` · `DROP` · `CREATE` · `ALTER` · `TRUNCATE` · `GRANT` · `REVOKE` · `COPY`
 
 The scanner neutralizes string literals and comments first, preventing false positives from queries like `SELECT * FROM logs WHERE message LIKE '%DELETE%'`.
 
@@ -518,38 +520,18 @@ Check `MCP_AUTH_PASSWORD` is set and the rate limiter hasn't kicked in (5 attemp
 
 MIT License. Free to use, modify, and distribute with attribution. Provided "as is" with no warranty of any kind — use at your own risk. See below.
 
-```
-MIT License
-
-Copyright (c) 2026 Abelara
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
+<br><br>
 
 <div align="center">
+
+<a href="https://abelara.com">
+  <img src="images/abelara-logo.svg" alt="Abelara" width="200">
+</a>
 
 **Built by [Abelara](https://abelara.com)**
 
 PgLLens is part of the Abelara toolkit for industrial AI and edge computing.
 
-[Report Bug](https://github.com/abelara/pgllens/issues) · [Request Feature](https://github.com/abelara/pgllens/issues) · [Documentation](https://docs.abelara.com/pgllens)
+[Report Bug](https://github.com/DMDuFresne/pgllens/issues) · [Request Feature](https://github.com/DMDuFresne/pgllens/issues) · [Learn More](https://abelara.com)
 
 </div>

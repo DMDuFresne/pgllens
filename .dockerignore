@@ -1,0 +1,25 @@
+# Exclude dependencies (rebuilt in container)
+node_modules/
+
+# Exclude build output (rebuilt in container)
+dist/
+
+# Exclude environment files (passed at runtime)
+.env
+.env.local
+.env.*.local
+
+# Exclude IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Exclude logs and test artifacts
+*.log
+npm-debug.log*
+coverage/
+
+# Exclude git
+.git/
+.gitignore

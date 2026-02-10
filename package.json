@@ -1,0 +1,53 @@
+{
+  "name": "pgllens",
+  "version": "2.1.0",
+  "description": "Give AI eyes on your database. Self-documenting PostgreSQL MCP server with schema introspection, semantic discovery, and domain context.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:oauth": "node dist/index.js --oauth",
+    "dev": "tsx watch src/index.ts",
+    "dev:oauth": "tsx watch src/index.ts --oauth",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "postgres",
+    "postgresql",
+    "database",
+    "llm",
+    "ai",
+    "self-documenting",
+    "schema-introspection",
+    "streamable-http",
+    "oauth",
+    "timescaledb"
+  ],
+  "author": "Abelara",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.0",
+    "pg": "^8.13.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

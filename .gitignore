@@ -22,4 +22,10 @@ Thumbs.db
 npm-debug.log*
 
 # Test coverage
-coverage/
+coverage
+
+# Claude Code
+.claude
+
+# MCP config
+.mcp.json

@@ -117,6 +117,18 @@ function clearRateLimit(ip: string): void {
 }
 
 /**
+ * HTML-escape a string for safe interpolation into HTML templates
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
  * Timing-safe password comparison to prevent timing attacks
  */
 function safeComparePasswords(provided: string, expected: string): boolean {
@@ -158,6 +170,20 @@ const authCodes: Record<string, {
   code_challenge_method?: string;
   expires: number;
 }> = {};
+
+// Issued token store (maps token to client info and expiry)
+const issuedTokens = new Map<string, { clientId: string; expiresAt: number }>();
+
+// Periodic cleanup of expired tokens (every 10 minutes)
+const tokenCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [token, info] of issuedTokens) {
+    if (info.expiresAt <= now) {
+      issuedTokens.delete(token);
+    }
+  }
+}, 600000);
+tokenCleanupInterval.unref();
 
 /**
  * Create and configure the MCP server with all tools
@@ -455,9 +481,12 @@ function createAuthMiddleware() {
 
     const token = authHeader.substring(7);
 
-    // Simple token validation - accept any non-empty token
-    // Claude Desktop will provide one after OAuth flow
-    if (!token) {
+    // Validate token exists in our issued token store and has not expired
+    const tokenInfo = issuedTokens.get(token);
+    if (!token || !tokenInfo || tokenInfo.expiresAt <= Date.now()) {
+      if (tokenInfo) {
+        issuedTokens.delete(token); // Clean up expired token
+      }
       res.status(401).json({
         error: 'invalid_token',
         error_description: 'Invalid or expired token',
@@ -536,8 +565,8 @@ export async function startServer(): Promise<void> {
     allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'Last-Event-Id'],
     exposedHeaders: ['Mcp-Session-Id'],
   }));
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   // Auth middleware (conditional)
   const authMiddleware = useOAuth ? createAuthMiddleware() : null;
@@ -664,13 +693,13 @@ export async function startServer(): Promise<void> {
       <p class="subtitle">MCP Authorization</p>
     </div>
     <p>Enter password to continue</p>
-    ${error ? `<div class="error">${error}</div>` : ''}
+    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}
     <form method="POST">
-      <input type="hidden" name="redirect_uri" value="${redirect_uri || ''}" />
-      <input type="hidden" name="state" value="${state || ''}" />
-      <input type="hidden" name="client_id" value="${client_id || ''}" />
-      <input type="hidden" name="code_challenge" value="${code_challenge || ''}" />
-      <input type="hidden" name="code_challenge_method" value="${code_challenge_method || ''}" />
+      <input type="hidden" name="redirect_uri" value="${escapeHtml(redirect_uri || '')}" />
+      <input type="hidden" name="state" value="${escapeHtml(state || '')}" />
+      <input type="hidden" name="client_id" value="${escapeHtml(client_id || '')}" />
+      <input type="hidden" name="code_challenge" value="${escapeHtml(code_challenge || '')}" />
+      <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method || '')}" />
       <label for="password">Password</label>
       <input type="password" id="password" name="password" placeholder="Enter passphrase" autofocus required />
       <button type="submit">Authorize</button>
@@ -685,6 +714,16 @@ export async function startServer(): Promise<void> {
     // GET - show login form (or auto-approve if no password set)
     app.get('/oauth/authorize', (req, res) => {
       const { redirect_uri, state, client_id, code_challenge, code_challenge_method } = req.query;
+
+      // Validate redirect_uri against registered client
+      const client = oauthClients[client_id as string];
+      if (client && redirect_uri && !client.redirect_uris.includes(redirect_uri as string)) {
+        res.status(400).json({
+          error: 'invalid_request',
+          error_description: 'redirect_uri does not match any registered redirect URIs for this client',
+        });
+        return;
+      }
 
       // If no password configured, auto-approve (backward compatible)
       if (!authPassword) {
@@ -707,6 +746,16 @@ export async function startServer(): Promise<void> {
     app.post('/oauth/authorize', (req, res) => {
       const { redirect_uri, state, client_id, code_challenge, code_challenge_method, password } = req.body;
       const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+
+      // Validate redirect_uri against registered client
+      const client = oauthClients[client_id as string];
+      if (client && redirect_uri && !client.redirect_uris.includes(redirect_uri as string)) {
+        res.status(400).json({
+          error: 'invalid_request',
+          error_description: 'redirect_uri does not match any registered redirect URIs for this client',
+        });
+        return;
+      }
 
       // Check rate limiting
       const rateLimitError = checkRateLimit(clientIp);
@@ -743,25 +792,41 @@ export async function startServer(): Promise<void> {
 
     // OAuth token endpoint (exchanges code for access token OR handles client_credentials)
     app.post('/oauth/token', (req, res) => {
-      const { code, grant_type, client_id, client_secret } = req.body;
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+
+      // Rate limiting on token endpoint
+      const rateLimitError = checkRateLimit(clientIp);
+      if (rateLimitError) {
+        res.status(429).json({
+          error: 'too_many_requests',
+          error_description: rateLimitError,
+        });
+        return;
+      }
+
+      const { code, grant_type, client_id } = req.body;
 
       // Support client_credentials grant for Claude Code (machine-to-machine)
       if (grant_type === 'client_credentials') {
-        // For local dev, accept any registered client or auto-register
-        if (client_id && !oauthClients[client_id]) {
-          // Auto-register the client for convenience
-          oauthClients[client_id] = {
-            client_id,
-            client_secret,
-            redirect_uris: [],
-            client_name: 'Auto-registered Client',
-            created_at: Date.now(),
-          };
-          console.log(`Auto-registered OAuth client: ${client_id}`);
+        // Require clients to register first via /oauth/register
+        if (!client_id || !oauthClients[client_id]) {
+          recordFailedAttempt(clientIp);
+          res.status(401).json({
+            error: 'invalid_client',
+            error_description: 'Unknown client_id. Register via /oauth/register first.',
+          });
+          return;
         }
 
+        clearRateLimit(clientIp);
+        const accessToken = randomUUID();
+        issuedTokens.set(accessToken, {
+          clientId: client_id,
+          expiresAt: Date.now() + OAUTH_TOKEN_EXPIRES_IN * 1000,
+        });
+
         res.json({
-          access_token: randomUUID(),
+          access_token: accessToken,
           token_type: 'Bearer',
           expires_in: OAUTH_TOKEN_EXPIRES_IN,
         });
@@ -774,6 +839,7 @@ export async function startServer(): Promise<void> {
         const authCode = authCodes[code];
         if (!authCode || authCode.expires < Date.now()) {
           delete authCodes[code];
+          recordFailedAttempt(clientIp);
           res.status(400).json({
             error: 'invalid_grant',
             error_description: 'Invalid or expired authorization code',
@@ -784,8 +850,15 @@ export async function startServer(): Promise<void> {
         // Clean up used code
         delete authCodes[code];
 
+        clearRateLimit(clientIp);
+        const accessToken = randomUUID();
+        issuedTokens.set(accessToken, {
+          clientId: authCode.client_id,
+          expiresAt: Date.now() + OAUTH_TOKEN_EXPIRES_IN * 1000,
+        });
+
         res.json({
-          access_token: randomUUID(),
+          access_token: accessToken,
           token_type: 'Bearer',
           expires_in: OAUTH_TOKEN_EXPIRES_IN,
         });

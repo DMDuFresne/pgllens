@@ -37,6 +37,12 @@ function loadDomainContextFile(filePath: string | undefined): string | undefined
       : path.resolve(process.cwd(), filePath);
 
     if (fs.existsSync(resolvedPath)) {
+      const stats = fs.statSync(resolvedPath);
+      const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
+      if (stats.size > MAX_FILE_SIZE) {
+        console.warn(`Domain context file exceeds 1MB limit (${(stats.size / 1024 / 1024).toFixed(2)}MB): ${resolvedPath}`);
+        return undefined;
+      }
       return fs.readFileSync(resolvedPath, 'utf-8');
     } else {
       console.warn(`Domain context file not found: ${resolvedPath}`);

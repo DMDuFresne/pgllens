@@ -49,9 +49,11 @@ export async function closePool(): Promise<void> {
 export function containsBlockedKeywords(sql: string): string | null {
   // Neutralize string contents, line comments, and block comments
   const stripped = sql
-    .replace(/'[^']*'/g, "''")           // Neutralize string literal contents
-    .replace(/--[^\n]*/g, '')            // Remove line comments
-    .replace(/\/\*[\s\S]*?\*\//g, '');   // Remove block comments
+    .replace(/\$([^$]*)\$[\s\S]*?\$\1\$/g, "''")  // Neutralize dollar-quoted strings ($$...$$ and $tag$...$tag$)
+    .replace(/E'(?:[^'\\]|\\.)*'/gi, "''")         // Neutralize PostgreSQL escape strings (E'...')
+    .replace(/'[^']*'/g, "''")                      // Neutralize string literal contents
+    .replace(/--[^\n]*/g, '')                       // Remove line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '');              // Remove block comments
 
   for (const keyword of BLOCKED_KEYWORDS) {
     // Match keyword as a whole word (not part of another word)
@@ -123,6 +125,8 @@ export async function rawQuery<T extends pg.QueryResultRow = pg.QueryResultRow>(
   const client = await getPool().connect();
 
   try {
+    // Prevent schema introspection queries from hanging indefinitely
+    await client.query('SET statement_timeout = 60000'); // 60 seconds
     const result = await client.query<T>(sql, params);
     return result;
   } finally {

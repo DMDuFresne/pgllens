@@ -28,8 +28,16 @@
     "oauth",
     "timescaledb"
   ],
-  "author": "Abelara",
+  "author": "Dylan DuFresne",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DMDuFresne/pgllens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DMDuFresne/pgllens/issues"
+  },
+  "homepage": "https://github.com/DMDuFresne/pgllens#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.0",
     "cors": "^2.8.5",

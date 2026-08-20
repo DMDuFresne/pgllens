@@ -34,6 +34,10 @@ RUN npm prune --production
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS runtime
 
+LABEL org.opencontainers.image.source="https://github.com/DMDuFresne/pgllens" \
+      org.opencontainers.image.description="PgLLens — give AI eyes on your PostgreSQL database" \
+      org.opencontainers.image.licenses="MIT"
+
 # Security: Run as non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 -G nodejs

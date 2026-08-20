@@ -69,7 +69,7 @@ PgLLens is now running at `http://localhost:3000` with the MCP endpoint at `/mcp
 ```bash
 docker run -p 3000:3000 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/mydb" \
-  dmdufresne/pgllens:latest
+  ghcr.io/dmdufresne/pgllens:2.1.0
 ```
 
 ### Connect to Claude Desktop

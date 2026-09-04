@@ -1,0 +1,9 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests"],
+  "docker-compose": { "enabled": true },
+  "packageRules": [
+    { "matchDatasources": ["docker"], "matchUpdateTypes": ["digest"], "automerge": false, "groupName": "ops image digests" },
+    { "matchDatasources": ["docker"], "matchUpdateTypes": ["major"], "enabled": false }
+  ]
+}

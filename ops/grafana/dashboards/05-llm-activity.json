@@ -1,0 +1,101 @@
+{
+  "uid": "pgllens-llm-activity",
+  "title": "LLM activity",
+  "tags": ["pgllens", "llm", "audit", "loki"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "timezone": "",
+  "templating": { "list": [] },
+  "annotations": { "list": [ { "name": "Annotations & Alerts", "type": "dashboard", "enable": true, "iconColor": "rgba(0, 211, 255, 1)", "builtIn": 1, "datasource": { "type": "datasource", "uid": "-- Grafana --" } } ] },
+  "panels": [
+    {
+      "id": null,
+      "title": "About",
+      "type": "text",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "What the LLM asked this database. Audit lines carry `tool`, `outcome`, `duration_ms`, `client_id`, `sub`, `ip`, `args_hash`, `rows` (JSON fields, queried with `| json`). Latency histograms come from Prometheus. Rejections (`outcome=rejected`) are safety-gate hits -- an LLM probing writes shows up here."
+      }
+    },
+    {
+      "id": null,
+      "title": "Rejections & errors (safety-gate hits, bad SQL)",
+      "description": "Every audit line whose outcome is not `ok`. This is the panel to read first: a burst here is the read-only gate refusing SQL, or PostgreSQL refusing it.",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 3 },
+      "options": { "showTime": true, "wrapLogMessage": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=\"pgllens-audit\", event=\"tool_call\"} | json | outcome != `ok`"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Tool calls by tool",
+      "description": "Audit lines per 5m bucket, split by tool -- which of the 31 tools the model actually reaches for.",
+      "type": "timeseries",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (tool) (count_over_time({job=\"pgllens-audit\", event=\"tool_call\"} | json | __error__=\"\" [5m]))",
+          "legendFormat": "{{tool}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Outcome mix",
+      "description": "The same audit lines split by outcome. Healthy traffic is almost entirely green.",
+      "type": "timeseries",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ok" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "rejected" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "db_error" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "unknown_schema" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "not_found" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (outcome) (count_over_time({job=\"pgllens-audit\", event=\"tool_call\"} | json | __error__=\"\" [5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "p95 tool latency",
+      "description": "95th-percentile duration per tool from the Prometheus histogram -- the latency the model waits on.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(pgllens_tool_call_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{tool}}"
+        }
+      ]
+    }
+  ]
+}

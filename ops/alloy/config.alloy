@@ -1,0 +1,109 @@
+// Grafana Alloy: two pipelines.
+//   1. Tail the pgllens audit JSONL (read-only mount) and ship to Loki. The file is
+//      the record; Loki is the mirror. Retries are unlimited so a Loki outage is a
+//      delay, never a gap -- positions only advance on an acknowledged write.
+//   2. Ship every stack container's stdout to Loki (Production tier), so "Tempo
+//      refused the connection" is readable in Grafana instead of on the VM.
+// LABEL RULE: `event` is the only label on the audit stream. `container` and
+// `level` are the only labels on the docker stream. Everything else is queried
+// with `| json` / `| logfmt`.
+
+// ---- 1. audit trail ----------------------------------------------------------
+
+local.file_match "audit" {
+	path_targets = [{
+		__path__ = "/audit/audit.jsonl",
+		job      = "pgllens-audit",
+	}]
+}
+
+loki.source.file "audit" {
+	targets    = local.file_match.audit.targets
+	forward_to = [loki.process.audit.receiver]
+}
+
+loki.process "audit" {
+	stage.json {
+		expressions = {
+			event = "event",
+		}
+	}
+
+	stage.labels {
+		values = {
+			event = "",
+		}
+	}
+
+	forward_to = [loki.write.default.receiver]
+}
+
+// ---- 2. container logs -------------------------------------------------------
+
+discovery.docker "stack" {
+	host = "unix:///var/run/docker.sock"
+
+	// The project label is how compose tags every container in this stack. It
+	// follows COMPOSE_PROJECT_NAME (which defaults to the directory name), so the
+	// same lever is passed into this container and defaulted to "pgllens" here.
+	filter {
+		name   = "label"
+		values = ["com.docker.compose.project=" + coalesce(sys.env("COMPOSE_PROJECT_NAME"), "pgllens")]
+	}
+}
+
+discovery.relabel "stack" {
+	targets = discovery.docker.stack.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "pgllens-docker"
+	}
+}
+
+loki.source.docker "stack" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.stack.output
+	forward_to = [loki.process.docker.receiver]
+}
+
+loki.process "docker" {
+	// pgllens logs JSON ("level": "INFO"); Grafana-family images log logfmt
+	// (level=info). One regex covers both; anything unmatched has no level label.
+	stage.regex {
+		expression = "(?i)\"?level\"?[=:]\\s*\"?(?P<level>[a-z]+)"
+	}
+
+	stage.template {
+		source   = "level"
+		template = "{{ ToLower .Value }}"
+	}
+
+	stage.labels {
+		values = {
+			container = "",
+			level = "",
+		}
+	}
+
+	forward_to = [loki.write.default.receiver]
+}
+
+// ---- sink --------------------------------------------------------------------
+
+loki.write "default" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+
+		// Zero loss: never give up on a batch. Backoff caps at one minute so
+		// recovery after an outage is prompt.
+		max_backoff_retries = 0
+		max_backoff_period  = "1m"
+	}
+}

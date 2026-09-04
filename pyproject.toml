@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pgllens"
+version = "2.0.0"
+description = "Give AI eyes on your database. Read-only MCP lens onto PostgreSQL."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Abelara" }]
+requires-python = ">=3.11,<3.13"
+keywords = ["postgresql", "mcp", "model-context-protocol", "read-only", "database", "ai", "llm"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Database :: Front-Ends",
+    "Typing :: Typed",
+]
+dependencies = [
+    "mcp>=2.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "uvicorn>=0.36",
+    "starlette>=0.37",
+    "psycopg[binary,pool]>=3.2",
+    "pyjwt[crypto]>=2.9",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "httpx>=0.27", "ruff>=0.5", "mypy>=1.10"]
+observability = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+    "opentelemetry-instrumentation-asgi>=0.48b0",
+    "prometheus-client>=0.20",
+]
+redis = [
+    "redis>=5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/DMDuFresne/pgllens"
+Repository = "https://github.com/DMDuFresne/pgllens"
+Documentation = "https://github.com/DMDuFresne/pgllens/tree/main/docs"
+Issues = "https://github.com/DMDuFresne/pgllens/issues"
+
+[project.scripts]
+pgllens = "pgllens.__main__:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: requires a real, reachable PostgreSQL (see tests/integration/conftest.py); skips cleanly otherwise",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["opentelemetry.*", "prometheus_client.*"]
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "fakeredis>=2.23",
+    "pyyaml>=6.0",
+]

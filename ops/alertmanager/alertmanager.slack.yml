@@ -1,0 +1,61 @@
+# ops/alertmanager/alertmanager.slack.yml
+# Selected by entrypoint.sh when SLACK_WEBHOOK_URL is set. The URL itself is
+# written to /tmp/slack_url by the entrypoint and never appears in this file.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: slack
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Heartbeat: its own route so grouping never merges it with a real alert.
+    - matchers: ['alertname="Watchdog"']
+      receiver: slack-heartbeat
+      group_wait: 0s
+      group_interval: 4h
+      repeat_interval: 4h
+    - matchers: ['severity="critical"']
+      receiver: slack
+      group_wait: 30s
+      repeat_interval: 4h
+    - matchers: ['severity="warning"']
+      receiver: slack
+      group_wait: 5m
+      repeat_interval: 12h
+    # "No repeat" is not expressible; one year is the conventional stand-in.
+    - matchers: ['severity="info"']
+      receiver: slack
+      group_wait: 1m
+      repeat_interval: 8760h
+
+inhibit_rules:
+  # If pgllens is down, its error rate and audit shipping are meaningless.
+  - source_matchers: ['alertname="PgllensDown"']
+    target_matchers: ['alertname=~"PgllensHighToolErrorRate|AuditShippingStalled"']
+    equal: []
+  # If Loki is down, Alloy dropping is a symptom.
+  - source_matchers: ['alertname="MonitoringTargetDown"', 'job="loki"']
+    target_matchers: ['alertname="AuditShippingDropping"']
+    equal: []
+
+receivers:
+  - name: slack
+    slack_configs:
+      - api_url_file: /tmp/slack_url
+        send_resolved: true
+        title: '{{ .Status | toUpper }}{{ if eq .Status "firing" }} ({{ .Alerts.Firing | len }}){{ end }} {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}*{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          severity={{ .Labels.severity }}{{ if .Labels.job }} job={{ .Labels.job }}{{ end }}{{ if .Labels.tool }} tool={{ .Labels.tool }}{{ end }}
+          <{{ .GeneratorURL }}|Prometheus> · <http://localhost:3001/d/pgllens-overview|Overview dashboard>
+          {{ end }}
+  - name: slack-heartbeat
+    slack_configs:
+      - api_url_file: /tmp/slack_url
+        send_resolved: false
+        title: "pgllens monitoring heartbeat"
+        text: "Alerting pipeline alive. If these stop, the pipeline is broken."

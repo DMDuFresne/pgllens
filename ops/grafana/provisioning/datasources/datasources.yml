@@ -1,0 +1,57 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Exemplars carry a trace_id; make it one click to the trace.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  # Tempo runs in the `observe` profile. Harmless when it is not up -- the datasource
+  # simply shows as unreachable.
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        query: '{job="pgllens-audit"} | json | trace_id="$${__span.traceId}"'
+      serviceMap:
+        datasourceUid: prometheus
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      # Make any client_ip in an audit line a one-click geo/whois lookup (license-free).
+      derivedFields:
+        - name: client_ip
+          matcherType: regex
+          matcherRegex: '"client_ip":\s*"([^"]+)"'
+          url: 'https://ipinfo.io/$${__value.raw}'
+          urlDisplayLabel: 'Geo / whois lookup'
+        # trace_id lands in audit lines in Phase 2; the link is inert until then.
+        - name: trace_id
+          matcherType: regex
+          matcherRegex: '"trace_id":\s*"([0-9a-f]+)"'
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: 'View trace'

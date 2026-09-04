@@ -1,0 +1,109 @@
+# The monitoring stack watching itself. Every rule here answers "would I know if
+# the monitoring broke?" -- the property that separates a dashboard from prod
+# observability. Tested by rules/tests/stack.test.yml.
+groups:
+  - name: pgllens-stack
+    rules:
+      # Dead-man's switch. Routed to Slack on a slow repeat by Alertmanager;
+      # silence means the pipeline (Prometheus -> Alertmanager -> Slack) is broken.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "Alerting pipeline heartbeat"
+          description: >-
+            Always firing. If this stops arriving in Slack, Prometheus, Alertmanager,
+            or the Slack route is broken.
+
+      # Any observe-profile scrape target down. pgllens itself has PgllensDown;
+      # infra-profile exporters have InfraTargetDown below (info, not warning,
+      # since that profile is often deliberately off).
+      - alert: MonitoringTargetDown
+        expr: up{job=~"prometheus|alertmanager|grafana|loki|tempo|alloy"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Monitoring component {{ $labels.job }} is down"
+          description: >-
+            Prometheus cannot scrape job {{ $labels.job }}. The stack is partially
+            blind; check `docker compose ps` and the container's logs.
+
+      # Expected down when the `infra` profile isn't running; info severity only.
+      - alert: InfraTargetDown
+        expr: up{job=~"node|cadvisor|postgres"} == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Infra exporter {{ $labels.job }} is not scraped"
+          description: >-
+            Expected when the `infra` profile is not running. If it is running, the
+            exporter container is unhealthy.
+
+      # Calls are happening but Alloy is not reading the file that records them.
+      # `or on() vector(0)` matters: if Alloy is down or never scraped, the series
+      # is absent, `sum(increase(...))` returns no samples, and a bare `== 0` would
+      # match nothing -- the alert would go quiet in exactly the worst case.
+      - alert: AuditShippingStalled
+        expr: >-
+          (sum(increase(loki_source_file_read_bytes_total{path="/audit/audit.jsonl"}[10m])) or on() vector(0)) == 0
+          and sum(increase(pgllens_tool_calls_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Audit lines are not reaching Loki"
+          description: >-
+            pgllens is recording tool calls but Alloy has read no new audit bytes for
+            10m. The JSONL file is still the record; check the alloy container and the
+            audit volume mount.
+
+      - alert: AuditShippingDropping
+        expr: sum(increase(loki_write_dropped_entries_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alloy dropped audit lines"
+          description: >-
+            Alloy gave up on a batch and advanced past it; those lines are in the JSONL
+            file but not in Loki. With unlimited retries configured this should never
+            fire; if it does, check alloy logs for a 4xx from Loki.
+
+      - alert: DiskPressure
+        expr: >-
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.15
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Less than 15% disk free on {{ $labels.mountpoint }}"
+          description: >-
+            Prometheus TSDB, Loki chunks, and Tempo blocks all live on this disk. Lower
+            PROM_RETENTION_SIZE / LOKI_RETENTION, or prune Docker (`docker system
+            prune`) before the stack stops writing.
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "postgres_exporter cannot reach PostgreSQL"
+          description: >-
+            The database pgllens reads is unreachable from the monitoring network.
+            Expect PgllensConnectionErrorsFiring alongside this.
+
+      - alert: PostgresTooManyConnections
+        expr: sum(pg_stat_activity_count) / max(pg_settings_max_connections) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL is above 80% of max_connections"
+          description: >-
+            Something other than pgllens (its pool is capped by DB_POOL_MAX_SIZE) is
+            holding connections. Check pg_stat_activity by application_name.

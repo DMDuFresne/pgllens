@@ -1,0 +1,5 @@
+# Dev overlay: build the pgllens image from this checkout instead of pulling it.
+# Selected via COMPOSE_FILE in .env (see .env.example). Prod never includes this file.
+services:
+  pgllens:
+    build: .

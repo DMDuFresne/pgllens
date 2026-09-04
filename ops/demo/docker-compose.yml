@@ -1,0 +1,84 @@
+# Demo PostgreSQL, on the same host as pgllens. Opt-in overlay -- merge it on top
+# of the base stack:
+#
+#   COMPOSE_FILE=docker-compose.yml:ops/demo/docker-compose.yml   (in .env; see .env.example)
+#
+# and point the app at it in .env:
+#
+#   DATABASE_URL=postgresql://pgllens:pgllens-demo@demo-db:5432/demo
+#   EXPOSED_SCHEMAS=app_core,app_audit,app_custom
+#   DB_REQUIRE_VERIFY_FULL=false
+#   REDACT_COLUMNS=%pin%,%password%,%passwd%,%secret%,%api_key%,ssn,%_ssn,ssn_%,%_ssn_%,token,%_token,%_token_%
+#
+# verify-full is deliberately off here: pgllens reaches demo-db by service name
+# over this compose network, so the connection never leaves the host and there is
+# no wire to protect. Turn it back on the moment the database is remote.
+#
+# A REDACT_COLUMNS value REPLACES the default list, so the example above restates
+# the defaults and adds %pin%. It pairs with demo columns app_core.technician.badge_pin
+# and app_core.technician.api_token -- get_sample_data renders them as [masked].
+#
+# ops/demo/*.sql runs once, in filename order, on first initialisation only --
+# that is the postgres image's own /docker-entrypoint-initdb.d contract, not
+# anything custom. To re-seed: docker compose ... down -v (drops demo-db-data).
+
+services:
+  demo-db:
+    # Deliberately simple: no `profiles:` here. Including this file IS the opt-in; a profile
+    # on top would mean `-f ops/demo/docker-compose.yml` without `--profile demo`
+    # leaves pgllens depending on a service that was never enabled.
+    # TimescaleDB's official image on PostgreSQL 18 (Alpine). Ships timescaledb and
+    # the contrib modules (pg_stat_statements). Both must be preloaded; the -c
+    # flag below overrides the image's own postgresql.conf tuning, so it has to
+    # name both libraries.
+    image: timescale/timescaledb:latest-pg18
+    container_name: pgllens-demo-db
+    # pg_stat_statements has to be preloaded at server start; without it
+    # get_query_store degrades to its "run CREATE EXTENSION" message instead of
+    # demoing the real thing. track_io_timing enriches explain_query output.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements,timescaledb"
+      - "-c"
+      - "pg_stat_statements.track=all"
+      - "-c"
+      - "track_io_timing=on"
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DEMO_DB_SUPERUSER_PASSWORD:-demo-superuser}
+      # The TimescaleDB image's entrypoint (unlike postgres:18-alpine's) enforces
+      # PG18's new versioned-data-directory convention and refuses to use a
+      # volume bind-mounted directly at /var/lib/postgresql/data. Point PGDATA at
+      # a subdirectory of that mount instead.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ./ops/demo:/docker-entrypoint-initdb.d:ro
+      - demo-db-data:/var/lib/postgresql/data
+    ports:
+      # Loopback so `psql -h localhost -p 5432` works on the VM for seeding and
+      # inspection, without publishing the database to the network. pgllens does
+      # not use this mapping -- it connects to demo-db:5432 internally.
+      - "${DEMO_DB_BIND:-127.0.0.1}:${DEMO_DB_PORT:-5432}:5432"
+    healthcheck:
+      # -U postgres -d demo, not the defaults: pg_isready's default user is the
+      # OS user (root) and it reports "accepting connections" while the init
+      # scripts are still running, which would let pgllens connect too early.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d demo"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  # Merged into the base pgllens service: wait for the seed to finish before the
+  # pool starts dialling. Without this the app spends its first ~30s logging
+  # connection failures on a cold volume.
+  pgllens:
+    depends_on:
+      demo-db:
+        condition: service_healthy
+
+volumes:
+  demo-db-data:

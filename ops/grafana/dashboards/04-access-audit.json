@@ -1,0 +1,137 @@
+{
+  "uid": "pgllens-access-audit",
+  "title": "Access audit",
+  "tags": ["pgllens", "audit", "loki"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "timezone": "",
+  "templating": {
+    "list": [
+      {
+        "name": "client_id",
+        "label": "Client ID",
+        "type": "textbox",
+        "query": ".*",
+        "current": { "text": ".*", "value": ".*" },
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "sub",
+        "label": "Subject",
+        "type": "textbox",
+        "query": ".*",
+        "current": { "text": ".*", "value": ".*" },
+        "options": [],
+        "hide": 0
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "type": "dashboard",
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "-- Grafana --" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": null,
+      "title": "About",
+      "type": "text",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Reads `AUDIT_LOG_FILE`'s JSONL, shipped by Grafana Alloy to Loki. One line per tool call: `timestamp`, `event`, `tool`, `outcome`, `duration_ms`, `sub`, `client_id`, `ip`, `args_hash`, `rows`. Only `event` is a Loki label (bounded); everything else is queried out of the JSON line with `| json` to avoid a high-cardinality stream. The `Client ID` and `Sub` variables are regexes applied after `| json` (Loki cannot enumerate JSON fields); leave them at `.*` for everything."
+      }
+    },
+    {
+      "id": null,
+      "title": "Tool calls over time by outcome",
+      "description": "Audit lines per 5m bucket, split by outcome. Sourced from Loki, so it survives a server restart that resets the Prometheus counters.",
+      "type": "timeseries",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ok" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "rejected" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "db_error" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "unknown_schema" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "not_found" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (outcome) (count_over_time({job=\"pgllens-audit\", event=\"tool_call\"} | json | __error__=\"\" | client_id=~\"$client_id\" | sub=~\"$sub\" [5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Top clients (24h)",
+      "description": "Ten busiest OAuth `client_id` values in the last 24h. Absent when auth is off -- unauthenticated calls audit a null client_id.",
+      "type": "table",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 13 },
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "align": "auto" } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "instant": true,
+          "queryType": "instant",
+          "expr": "topk(10, sum by (client_id) (count_over_time({job=\"pgllens-audit\", event=\"tool_call\"} | json | __error__=\"\" | client_id=~\"$client_id\" | sub=~\"$sub\" [24h])))"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Calls by IP (24h)",
+      "description": "Twenty busiest source IPs in the last 24h, taken from the audit line's `ip` field (the proxied client address, not the container's).",
+      "type": "table",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 13 },
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "align": "auto" } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "instant": true,
+          "queryType": "instant",
+          "expr": "topk(20, sum by (ip) (count_over_time({job=\"pgllens-audit\", event=\"tool_call\"} | json | __error__=\"\" | client_id=~\"$client_id\" | sub=~\"$sub\" [24h])))"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Recent audit lines",
+      "description": "The raw JSONL audit trail, newest first. `args_hash` is a salted digest of the call arguments -- it correlates repeats without storing SQL.",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 22 },
+      "options": { "showTime": true, "wrapLogMessage": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=\"pgllens-audit\"} | json | __error__=\"\" | client_id=~\"$client_id\" | sub=~\"$sub\""
+        }
+      ]
+    }
+  ]
+}

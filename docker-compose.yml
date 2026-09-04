@@ -1,31 +1,258 @@
+# pgllens deployment tiers (docs/DEPLOY.md#compose-and-tiers):
+#   Play        docker run ghcr.io/dmdufresne/pgllens        (no compose at all)
+#   Solo        pgllens only
+#   Observed    + monitoring plane            (profile: observe)
+#   Production  + host/db exporters           (profile: infra)
+# The `tunnel` profile adds cloudflared to any tier. ops/demo/docker-compose.yml adds a
+# demo PostgreSQL to any tier.
+#
+# This base file is pull-only: it runs ghcr.io/dmdufresne/pgllens:${PGLLENS_VERSION} and
+# needs no source tree. Dev adds docker-compose.dev.yml, which builds that image from the
+# checkout instead. Pick files and profiles once per machine with COMPOSE_FILE and
+# COMPOSE_PROFILES in .env (compose reads both from there; see .env.example), so the
+# everyday commands are:
+#   dev    docker compose up -d --build
+#   prod   docker compose pull && docker compose up -d
+#
+# pgllens never depends on a monitoring service. Every admin UI binds ADMIN_BIND
+# (loopback by default). Loki, Tempo, Alloy and the exporters are never published.
+
+x-hardened: &hardened
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  restart: unless-stopped
+
 services:
   pgllens:
-    build: .
-    image: dmdufresne/pgllens:latest
+    <<: *hardened
+    image: ghcr.io/dmdufresne/pgllens:${PGLLENS_VERSION:-2.0.0}
     container_name: pgllens
     ports:
-      - "${MCP_PORT:-3000}:3000"
-    command: ["node", "dist/index.js", "--oauth"]
+      - "${APP_BIND:-127.0.0.1}:${MCP_PORT:-3000}:3000"
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      MCP_PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      DB_REQUIRE_VERIFY_FULL: ${DB_REQUIRE_VERIFY_FULL:-false}
       EXPOSED_SCHEMAS: ${EXPOSED_SCHEMAS:-public}
-      QUERY_TIMEOUT_MS: ${QUERY_TIMEOUT_MS:-30000}
-      MAX_ROWS: ${MAX_ROWS:-1000}
-      SCHEMA_REFRESH_INTERVAL_MS: ${SCHEMA_REFRESH_INTERVAL_MS:-300000}
-      DOMAIN_CONTEXT_FILE: ${DOMAIN_CONTEXT_FILE:-}
-      DOMAIN_CONTEXT: ${DOMAIN_CONTEXT:-}
-      MCP_AUTH_PASSWORD: ${MCP_AUTH_PASSWORD:-change-me}
+      DEFAULT_SCHEMA: ${DEFAULT_SCHEMA:-}
+      REDACT_COLUMNS: ${REDACT_COLUMNS:-}
+      TOOL_RATE_LIMIT_PER_MINUTE: ${TOOL_RATE_LIMIT_PER_MINUTE:-120}
+      TOOL_COST_BUDGET_PER_MINUTE: ${TOOL_COST_BUDGET_PER_MINUTE:-}
+      MAX_CONCURRENT_CALLS_PER_CLIENT: ${MAX_CONCURRENT_CALLS_PER_CLIENT:-0}
+      DOMAIN_CONTEXT_FILE: /app/context.md
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       EXTERNAL_BASE_URL: ${EXTERNAL_BASE_URL:-}
-      MCP_OAUTH_TOKEN_EXPIRES_IN: ${MCP_OAUTH_TOKEN_EXPIRES_IN:-604800}
-      MCP_RATE_LIMIT_ATTEMPTS: ${MCP_RATE_LIMIT_ATTEMPTS:-5}
-      MCP_RATE_LIMIT_WINDOW_MS: ${MCP_RATE_LIMIT_WINDOW_MS:-900000}
+      MCP_AUTH_MODE: ${MCP_AUTH_MODE:-none}
+      MCP_AUTH_PASSWORD: ${MCP_AUTH_PASSWORD:-}
+      OKTA_ISSUER: ${OKTA_ISSUER:-}
+      OKTA_AUDIENCE: ${OKTA_AUDIENCE:-}
+      OKTA_JWKS_URL_OVERRIDE: ${OKTA_JWKS_URL_OVERRIDE:-}
+      REDIS_URL: ${REDIS_URL:-}
+      # Observability levers (docs/OBSERVABILITY.md).
+      # Tracing on by default; an unreachable Tempo is reported once per 10m (Solo tier).
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4317}
+      AUDIT_LOG_FILE: ${AUDIT_LOG_FILE:-/data/audit/audit.jsonl}
+      AUDIT_SYSLOG: ${AUDIT_SYSLOG:-}
     volumes:
-      - ./context.md:/app/context.md:ro
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      - ./ops/context.md:/app/context.md:ro
+      - pgllens-audit:/data/audit
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 512m
+
+  # ---- observe profile: the monitoring plane -----------------------------------
+  prometheus:
+    <<: *hardened
+    profiles: [observe]
+    image: prom/prometheus:v3.12.0@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
+    container_name: pgllens-prometheus
+    entrypoint: ["/bin/sh", "/etc/prometheus/entrypoint.sh"]
+    command:
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROM_RETENTION_TIME:-30d}"
+      - "--storage.tsdb.retention.size=${PROM_RETENTION_SIZE:-2GB}"
+      - "--enable-feature=exemplar-storage"
+    environment:
+      PROM_REMOTE_WRITE_URL: ${PROM_REMOTE_WRITE_URL:-}
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
+      - ./ops/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
+    ports:
+      - "${ADMIN_BIND:-127.0.0.1}:9090:9090"
+    mem_limit: 1g
+
+  alertmanager:
+    <<: *hardened
+    profiles: [observe]
+    image: prom/alertmanager:v0.33.0@sha256:af26fbe4dd1886ac0efd7bd55cd9027da262e105b137a376522b7c14c3626e4a
+    container_name: pgllens-alertmanager
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    volumes:
+      - ./ops/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    read_only: true
+    tmpfs: ["/tmp:size=4m,mode=1777"]
+    ports:
+      - "${ADMIN_BIND:-127.0.0.1}:9093:9093"
+    mem_limit: 128m
+
+  grafana:
+    <<: *hardened
+    profiles: [observe]
+    image: grafana/grafana:13.0.2@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2
+    container_name: pgllens-grafana
+    # Compose interpolates the whole file before profile selection, so a `:?` on
+    # GRAFANA_ADMIN_PASSWORD would break `docker compose up` (Solo tier) even though
+    # grafana is not started. Enforce the password only when grafana actually starts.
+    # `$$` escapes compose interpolation so the shell, not compose, expands the var.
+    entrypoint: ["/bin/sh", "-c", "[ -n \"$$GF_SECURITY_ADMIN_PASSWORD\" ] || { echo 'GRAFANA_ADMIN_PASSWORD must be set for the observe profile' >&2; exit 1; }; exec /run.sh"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/00-overview.json
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    ports:
+      - "${ADMIN_BIND:-127.0.0.1}:3001:3000"
+    mem_limit: 512m
+
+  loki:
+    <<: *hardened
+    profiles: [observe]
+    image: grafana/loki:3.7.3@sha256:70b9f699fc9bb868b62f1cfd4f787dfa50242f1fd92e6089787d5d7daea75fe8
+    container_name: pgllens-loki
+    command: ["-config.file=/etc/loki/loki-config.yaml", "-config.expand-env=true"]
+    environment:
+      LOKI_RETENTION: ${LOKI_RETENTION:-2160h}
+    volumes:
+      - ./ops/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    mem_limit: 1g
+
+  alloy:
+    <<: *hardened
+    profiles: [observe]
+    image: grafana/alloy:v1.17.0@sha256:41c41849989b7e054ccbadc17938ee1e5592fe26bfbc56ef3ffc109c0b0b2739
+    container_name: pgllens-alloy
+    # /data, not the image's /var/lib/alloy/data: that path ships owned alloy:alloy
+    # 0770, which the root process cannot write once cap_drop drops DAC_OVERRIDE.
+    # Docker creates a volume at an unshipped path as root:root 0755, so the WAL
+    # persists and no capability is needed.
+    command:
+      - "run"
+      - "--storage.path=/data"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "/etc/alloy/config.alloy"
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-pgllens}
+    volumes:
+      - ./ops/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - pgllens-audit:/audit:ro
+      - alloy-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
+    mem_limit: 256m
+
+  tempo:
+    <<: *hardened
+    profiles: [observe]
+    image: grafana/tempo:3.0.2@sha256:cda87c212d8c584dc0b89e337e7ed648a5100feb657e5d528480ee4fa03dbbe3
+    container_name: pgllens-tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml", "-config.expand-env=true"]
+    environment:
+      TEMPO_RETENTION: ${TEMPO_RETENTION:-168h}
+    volumes:
+      - ./ops/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    mem_limit: 512m
+
+  # ---- infra profile: host, containers, database --------------------------------
+  node-exporter:
+    <<: *hardened
+    profiles: [infra]
+    image: prom/node-exporter:v1.9.1@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
+    container_name: pgllens-node-exporter
+    command: ["--path.rootfs=/host"]
+    volumes:
+      - /:/host:ro,rslave
+    pid: host
+    read_only: true
+    mem_limit: 64m
+
+  cadvisor:
+    # Not in the hardened anchor: cAdvisor needs host mounts and, on some kernels,
+    # SYS_ADMIN, to read cgroups, so only `cap_drop: [ALL]` is dropped from the
+    # anchor -- no-new-privileges and mem_limit still apply.
+    # Documented exception (docs/DEPLOY.md#security-posture).
+    profiles: [infra]
+    image: gcr.io/cadvisor/cadvisor:v0.52.1@sha256:f40e65878e25c2e78ea037f73a449527a0fb994e303dc3e34cb6b187b4b91435
+    container_name: pgllens-cadvisor
+    command: ["--docker_only=true", "--housekeeping_interval=30s", "--store_container_labels=false"]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    security_opt: ["no-new-privileges:true"]
+    privileged: false
     restart: unless-stopped
+    mem_limit: 256m
+
+  postgres-exporter:
+    <<: *hardened
+    profiles: [infra]
+    image: prometheuscommunity/postgres-exporter:v0.17.1@sha256:38606faa38c54787525fb0ff2fd6b41b4cfb75d455c1df294927c5f611699b17
+    container_name: pgllens-postgres-exporter
+    environment:
+      # Same read-only role as pgllens. Needs `GRANT pg_monitor` (ops/sql/pgllens-role.sql).
+      DATA_SOURCE_NAME: ${DATABASE_URL}
+      # lib/pq defaults to sslmode=require and has no `prefer`; psycopg (the app) defaults
+      # to prefer, which falls back to plaintext. `disable` is lib/pq's nearest equivalent
+      # against a server without TLS. An sslmode in DATABASE_URL overrides this (verified),
+      # so it only applies to a DSN that names none -- the same-host case. Override for
+      # stricter needs, or put sslmode=verify-full in the DSN for a remote database.
+      PGSSLMODE: ${POSTGRES_EXPORTER_SSLMODE:-disable}
+    read_only: true
+    mem_limit: 64m
+
+  # ---- tunnel profile ---------------------------------------------------------
+  cloudflared:
+    <<: *hardened
+    profiles: [tunnel]
+    image: cloudflare/cloudflared:2025.8.1@sha256:b77d84e8704db38db22c22661cf7e56468c526e3a6a5fe9c8b7c151452fa1472
+    container_name: pgllens-cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    read_only: true
+    mem_limit: 128m
+
+volumes:
+  pgllens-audit:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  loki-data:
+  alloy-data:
+  tempo-data:

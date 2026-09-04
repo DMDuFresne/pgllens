@@ -1,31 +1,66 @@
-# Dependencies
-node_modules/
+# Local-only project files
+CLAUDE.md
+docs/CHANGELOG.md
 
-# Build output
-dist/
-
-# Environment files
+# Secrets and local configuration
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+docker-compose.override.yml
+.mcp.json
 
-# IDE
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.python-version.local
+
+# Tooling caches and test artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit.xml
+
+# AI-assistant and scratch tooling state (local only)
+.claude/
+.superpowers/
+**/.superpowers/
+.firecrawl/
+.playwright-mcp/
+
+# Editors and OS
 .vscode/
 .idea/
-
-# OS
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Logs
+# Logs and temp files
 *.log
-npm-debug.log*
+*.tmp
+*.bak
+*.orig
+*.rej
 
-# Test coverage
-coverage
-
-# Claude Code
-.claude
-
-# MCP config
-.mcp.json
+# Legacy (pre-2.0 TypeScript server)
+node_modules/

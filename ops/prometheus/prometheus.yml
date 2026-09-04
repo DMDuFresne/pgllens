@@ -1,0 +1,55 @@
+# Prometheus scrape + alerting config for pgllens.
+# pgllens serves /metrics on the same port as MCP (3000); everything here is
+# scraped over the internal Docker network only. Targets from the `infra`
+# profile are listed unconditionally: when the profile is off they show as
+# down, and MonitoringTargetDown is deliberately scoped so that only the
+# `observe` jobs page (see stack.rules.yml).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # Absolute: entrypoint.sh runs Prometheus from a copy in /tmp, so a relative path would resolve there.
+  - "/etc/prometheus/rules/*.rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: pgllens
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["pgllens:3000"]
+
+  # --- the stack watching itself (observe profile) ---
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+  - job_name: alloy
+    static_configs:
+      - targets: ["alloy:12345"]
+
+  # --- host, containers, database (infra profile) ---
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]

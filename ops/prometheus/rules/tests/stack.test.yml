@@ -1,0 +1,148 @@
+# promtool unit tests for ops/prometheus/rules/stack.rules.yml
+rule_files:
+  - ../stack.rules.yml
+evaluation_interval: 15s
+tests:
+  - interval: 15s
+    input_series: []
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels: {severity: none}
+            exp_annotations:
+              summary: "Alerting pipeline heartbeat"
+              description: "Always firing. If this stops arriving in Slack, Prometheus, Alertmanager, or the Slack route is broken."
+  - interval: 15s
+    input_series:
+      - series: 'up{job="loki"}'
+        values: '1 1 0x40'
+      - series: 'up{job="pgllens"}'
+        values: '1 1 0x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MonitoringTargetDown
+        exp_alerts:
+          - exp_labels: {severity: warning, job: loki}
+            exp_annotations:
+              summary: "Monitoring component loki is down"
+              description: "Prometheus cannot scrape job loki. The stack is partially blind; check `docker compose ps` and the container's logs."
+  # Infra-profile exporter down: InfraTargetDown fires, MonitoringTargetDown does not.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="node"}'
+        values: '1 1 0x60'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: InfraTargetDown
+        exp_alerts:
+          - exp_labels: {severity: info, job: node}
+            exp_annotations:
+              summary: "Infra exporter node is not scraped"
+              description: "Expected when the `infra` profile is not running. If it is running, the exporter container is unhealthy."
+      - eval_time: 15m
+        alertname: MonitoringTargetDown
+        exp_alerts: []
+  # Calls keep coming but Alloy has read no new bytes for 10m.
+  - interval: 15s
+    input_series:
+      - series: 'loki_source_file_read_bytes_total{path="/audit/audit.jsonl"}'
+        values: '1000x60'
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="ok"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AuditShippingStalled
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Audit lines are not reaching Loki"
+              description: "pgllens is recording tool calls but Alloy has read no new audit bytes for 10m. The JSONL file is still the record; check the alloy container and the audit volume mount."
+  # Alloy is gone entirely -- the read-bytes series never appears. Without the
+  # `or on() vector(0)` guard the left leg matches nothing and this stays silent.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="ok"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AuditShippingStalled
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Audit lines are not reaching Loki"
+              description: "pgllens is recording tool calls but Alloy has read no new audit bytes for 10m. The JSONL file is still the record; check the alloy container and the audit volume mount."
+  # Healthy steady state: both legs increasing. The guard must not make this noisy.
+  - interval: 15s
+    input_series:
+      - series: 'loki_source_file_read_bytes_total{path="/audit/audit.jsonl"}'
+        values: '1000+50x60'
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="ok"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AuditShippingStalled
+        exp_alerts: []
+  # Quiet server: no calls, no bytes, no alert.
+  - interval: 15s
+    input_series:
+      - series: 'loki_source_file_read_bytes_total{path="/audit/audit.jsonl"}'
+        values: '1000x60'
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="ok"}'
+        values: '5x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AuditShippingStalled
+        exp_alerts: []
+  - interval: 15s
+    input_series:
+      - series: 'loki_write_dropped_entries_total{host="loki:3100"}'
+        values: '0 0 0 0 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7 7'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AuditShippingDropping
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Alloy dropped audit lines"
+              description: "Alloy gave up on a batch and advanced past it; those lines are in the JSONL file but not in Loki. With unlimited retries configured this should never fire; if it does, check alloy logs for a 4xx from Loki."
+  - interval: 15s
+    input_series:
+      - series: 'node_filesystem_avail_bytes{mountpoint="/",fstype="ext4"}'
+        values: '10x200'
+      - series: 'node_filesystem_size_bytes{mountpoint="/",fstype="ext4"}'
+        values: '100x200'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: DiskPressure
+        exp_alerts:
+          - exp_labels: {severity: warning, mountpoint: "/", fstype: ext4}
+            exp_annotations:
+              summary: "Less than 15% disk free on /"
+              description: "Prometheus TSDB, Loki chunks, and Tempo blocks all live on this disk. Lower PROM_RETENTION_SIZE / LOKI_RETENTION, or prune Docker (`docker system prune`) before the stack stops writing."
+  - interval: 15s
+    input_series:
+      - series: 'pg_up'
+        values: '1 1 0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PostgresDown
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "postgres_exporter cannot reach PostgreSQL"
+              description: "The database pgllens reads is unreachable from the monitoring network. Expect PgllensConnectionErrorsFiring alongside this."
+  - interval: 15s
+    input_series:
+      - series: 'pg_stat_activity_count{datname="demo",state="active"}'
+        values: '85x60'
+      - series: 'pg_settings_max_connections'
+        values: '100x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PostgresTooManyConnections
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "PostgreSQL is above 80% of max_connections"
+              description: "Something other than pgllens (its pool is capped by DB_POOL_MAX_SIZE) is holding connections. Check pg_stat_activity by application_name."

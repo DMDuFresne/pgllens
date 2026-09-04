@@ -1,0 +1,112 @@
+{
+  "uid": "pgllens-tool-calls",
+  "title": "Tool calls",
+  "tags": ["pgllens", "tools"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "timezone": "",
+  "templating": {
+    "list": [
+      {
+        "name": "tool",
+        "label": "Tool",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(pgllens_tool_calls_total, tool)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "type": "dashboard",
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "-- Grafana --" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": null,
+      "title": "About",
+      "type": "text",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "MCP tool-call outcomes and latency for **pgllens**. Every one of the 31 tools is wrapped by `tools/_util.py::tool_errors`, so this dashboard reflects all of them from one instrumentation point. `outcome` is one of `ok`, `rejected` (read-only gate refused the SQL), `unknown_schema`, `not_found`, `db_error`. Labels never carry a schema name or SQL text -- see docs/OBSERVABILITY.md."
+      }
+    },
+    {
+      "id": null,
+      "title": "Tool call rate by outcome",
+      "description": "Per-second tool-call rate, split by outcome, over a 5m window. A rising `rejected` line means the read-only gate is refusing SQL; `db_error` means PostgreSQL rejected it.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ok" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "rejected" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "db_error" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "unknown_schema" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "not_found" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(pgllens_tool_calls_total{tool=~\"$tool\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "p95 tool call duration by tool",
+      "description": "95th-percentile wall-clock duration per tool, from the `pgllens_tool_call_duration_seconds` histogram. Includes the PostgreSQL round-trip and formatting.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(pgllens_tool_call_duration_seconds_bucket{tool=~\"$tool\"}[5m])))",
+          "legendFormat": "{{tool}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Non-ok outcomes by tool (last 1h)",
+      "description": "Raw counter high-water mark per tool/outcome in the window. Uses max_over_time, not increase, so a series that first appears at 1 is still shown.",
+      "type": "table",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 13 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "instant": true,
+          "format": "table",
+          "expr": "max by (tool, outcome) (max_over_time(pgllens_tool_calls_total{outcome!=\"ok\", tool=~\"$tool\"}[1h]))"
+        }
+      ]
+    }
+  ]
+}

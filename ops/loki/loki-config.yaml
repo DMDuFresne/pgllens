@@ -1,0 +1,52 @@
+# Minimal single-binary Loki config for the pgllens audit/log store.
+# Targets Loki 3.x: TSDB index + filesystem object store, single replica, inmemory ring.
+# Retention is 90d by default (LOKI_RETENTION), enforced by the compactor.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # 90 days by default; the compactor enforces it. Container logs are shorter-lived.
+  retention_period: ${LOKI_RETENTION:-2160h}
+  retention_stream:
+    - selector: '{job="pgllens-docker"}'
+      priority: 1
+      period: 336h
+  # Refuse lines older than we would keep anyway. Equal to retention (not a
+  # shorter window) so a rebuilt Loki can still backfill from the audit file.
+  reject_old_samples: true
+  reject_old_samples_max_age: ${LOKI_RETENTION:-2160h}
+  volume_enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+analytics:
+  reporting_enabled: false

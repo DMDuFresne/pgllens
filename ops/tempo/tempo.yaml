@@ -1,0 +1,27 @@
+# Minimal single-binary Tempo config for the pgllens trace backend.
+# Targets Tempo 3.x (the v3 major removed the legacy `ingester` write path in favor of a
+# live-store, and moved block retention under `overrides`; `ingester:`/`compactor:` are no
+# longer top-level fields). Receives OTLP gRPC on :4317 and stores traces locally.
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+# Traces are for debugging, not for the record: 7 days by default.
+overrides:
+  defaults:
+    compaction:
+      block_retention: ${TEMPO_RETENTION:-168h}

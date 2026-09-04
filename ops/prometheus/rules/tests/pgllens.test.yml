@@ -1,0 +1,116 @@
+rule_files:
+  - ../pgllens.rules.yml
+evaluation_interval: 15s
+tests:
+  # A single burst of connection errors at t=1m must page. Today's rule never fires here.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_connection_errors_total'
+        values: '0 0 0 0 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PgllensConnectionErrorsFiring
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "pgllens is failing to connect to PostgreSQL"
+              description: "pgllens_connection_errors_total has increased over the last 10m. The configured PostgreSQL host is unreachable, credentials are wrong, or the network path (firewall, VPN, TLS) is broken."
+  # Sustained rejections page as critical.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="rejected"}'
+        values: '0+3x80'
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="ok"}'
+        values: '0+1x80'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PgllensReadOnlyGateRejections
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "pgllens read-only gate is rejecting queries"
+              description: "The safety gate (database/safety.py) has refused SQL repeatedly over 5m. A single rejection is a model writing bad SQL; a sustained rate is someone probing for a way past the gate. Pull the audit trail for outcome=\"rejected\", group by client_id, and correlate args_hash to see whether one payload is being retried or many are being tried."
+  # Scrape target gone for 2m pages.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="pgllens"}'
+        values: '1 1 1 1 0x40'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PgllensDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: pgllens}
+            exp_annotations:
+              summary: "pgllens is not responding to Prometheus scrapes"
+              description: "Prometheus has been unable to scrape pgllens:3000/metrics for over 2m. The process may be down, unhealthy, or unreachable on the monitoring network."
+  # One rejection is visible as an info alert, even if it never becomes a flood.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="rejected"}'
+        values: '0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PgllensReadOnlyGateRejection
+        exp_alerts:
+          - exp_labels: {severity: info}
+            exp_annotations:
+              summary: "pgllens read-only gate rejected a query"
+              description: "At least one tool call was refused by the safety gate in the last 15m. Pull the audit trail for outcome=\"rejected\" to see the client and args_hash."
+      - eval_time: 2m
+        alertname: PgllensReadOnlyGateRejections
+        exp_alerts: []
+  # Sustained 33% error rate but under 0.05 calls/s total: the traffic floor keeps this silent; without the guard it would page.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="db_error"}'
+        values: '0+0.2x80'
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="ok"}'
+        values: '0+0.4x80'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PgllensHighToolErrorRate
+        exp_alerts: []
+  # Real traffic with 20% errors does page.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="db_error"}'
+        values: '0+1x80'
+      - series: 'pgllens_tool_calls_total{tool="query",outcome="ok"}'
+        values: '0+4x80'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PgllensHighToolErrorRate
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "pgllens tool-call error rate above 10%"
+              description: "More than 10% of tool calls have failed with db_error/unknown_schema over the last 10m. Check PostgreSQL reachability, the pgllens role's grants (ops/sql/pgllens-role.sql), and the audit trail for which tools are failing."
+  # Sustained token rejections (20/min against a 12/min threshold) page as warning.
+  # Evaluated at 14m, not 12m: rate() over a [5m] window that extends before the
+  # series start under-reports, so the rule only goes active at 3m15s and the 10m
+  # hold expires at 13m15s.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_auth_failures_total'
+        values: '0+5x80'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PgllensAuthFailureSpike
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "pgllens is rejecting more than 12 tokens per minute"
+              description: "Sustained authentication failures over 10m. Check OKTA_AUDIENCE against the authorization server's audience, then the audit trail for the source IPs. A spike from many IPs is an attack; from one, a broken client."
+  # Sustained throttling (40/min against a 30/min threshold) pages as warning.
+  - interval: 15s
+    input_series:
+      - series: 'pgllens_limit_rejections_total{kind="calls"}'
+        values: '0+10x80'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PgllensRateLimitRejectionSpike
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "pgllens is throttling more than 30 requests per minute"
+              description: "Sustained limit rejections over 10m. Break down by `kind` (calls|cost|concurrency|scope) to tell a runaway client from a too-tight limit. `kind=\"scope\"` is different in nature: a client is calling tools its token is not entitled to."

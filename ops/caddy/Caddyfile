@@ -1,0 +1,60 @@
+# ops/caddy/Caddyfile
+# TLS termination for PgLLens. Caddy does ACME itself -- no certbot, no cron.
+# Start with:  docker compose --profile tls up -d
+# Requires PGLLENS_DOMAIN (a real hostname resolving to this host) and ACME_EMAIL.
+
+{
+	email {$ACME_EMAIL}
+}
+
+# Caddy redirects :80 -> :443 automatically for a site defined by hostname, and
+# serves the ACME HTTP-01 challenge there.
+{$PGLLENS_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		# `preload` submits this domain to browser HSTS preload lists, which is
+		# effectively irreversible (removal takes months and reaches already-shipped
+		# browsers slowly) -- only submit at hstspreload.org once you're sure this
+		# domain will stay HTTPS-only forever. Drop `preload` here if that's not
+		# a commitment you want made by default.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# /metrics is an internal ops endpoint (Prometheus reaches it over the
+	# Docker network directly) -- never bearer-gated, so it must not be
+	# reachable on the public hostname at all. See docs/DEPLOY.md's
+	# "/metrics exposure caveat". /mcp, /health and /.well-known/* stay
+	# proxied below, unmatched.
+	@metrics path /metrics
+	respond @metrics 404
+
+	# Belt-and-braces on top of BodySizeLimitMiddleware's app-wide 1 MiB cap
+	# (audit M2): reject oversize bodies at the edge, before they reach the app.
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy pgllens:3000 {
+		# OVERWRITE, not append. Caddy's default appends the peer address to any
+		# inbound X-Forwarded-For, which leaves the client-supplied portion in
+		# the header. PgLLens reads the rightmost hop (oauth/clientip.py), so an
+		# appended header is already safe -- overwriting makes the whole header
+		# unforgeable, which is what TRUST_PROXY_HEADERS=true assumes.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Real-IP {remote_host}
+		# Pin these explicitly rather than relying on Caddy's reverse_proxy
+		# defaults: EXTERNAL_BASE_URL / OAuth discovery correctness depends on
+		# the app seeing the real scheme and host, not what it sees locally.
+		header_up X-Forwarded-Proto {scheme}
+		header_up Host {host}
+
+		# The MCP streamable-HTTP transport holds long-lived responses open.
+		flush_interval -1
+		transport http {
+			read_timeout 0
+		}
+	}
+}

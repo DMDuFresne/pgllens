@@ -1,0 +1,116 @@
+# pgllens alert rules.
+#
+# Phase 1 alerted on the server's own health. Phase 2 adds the four signals that
+# matter once the port is on the internet: failed auth, throttling, tool errors,
+# and -- the most interesting signal this server produces -- the read-only gate
+# refusing SQL.
+groups:
+  - name: pgllens
+    rules:
+      # Someone is presenting tokens that do not verify: expired, wrong
+      # audience, wrong issuer, or forged. A steady trickle is a misconfigured
+      # client; a spike is a credential attack.
+      - alert: PgllensAuthFailureSpike
+        expr: sum(rate(pgllens_auth_failures_total[5m])) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "pgllens is rejecting more than 12 tokens per minute"
+          description: >-
+            Sustained authentication failures over 10m. Check OKTA_AUDIENCE against
+            the authorization server's audience, then the audit trail for the source
+            IPs. A spike from many IPs is an attack; from one, a broken client.
+
+      # Throttling should be rare in steady state. Sustained 429s mean either a
+      # client in a retry loop or a deliberate flood.
+      - alert: PgllensRateLimitRejectionSpike
+        expr: sum(rate(pgllens_limit_rejections_total[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "pgllens is throttling more than 30 requests per minute"
+          description: >-
+            Sustained limit rejections over 10m. Break down by `kind`
+            (calls|cost|concurrency|scope) to tell a runaway client from a
+            too-tight limit. `kind="scope"` is different in nature: a client is
+            calling tools its token is not entitled to.
+
+      # THE signal. The read-only gate refusing SQL means something tried to
+      # write, or probed for a way past the gate.
+      - alert: PgllensReadOnlyGateRejections
+        expr: sum(rate(pgllens_tool_calls_total{outcome="rejected"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pgllens read-only gate is rejecting queries"
+          description: >-
+            The safety gate (database/safety.py) has refused SQL repeatedly over
+            5m. A single rejection is a model writing bad SQL; a sustained rate is
+            someone probing for a way past the gate. Pull the audit trail for
+            outcome="rejected", group by client_id, and correlate args_hash to see
+            whether one payload is being retried or many are being tried.
+
+      # The single-event sibling of the rule above. One rejection is the most
+      # interesting thing this server does all day; it should reach Slack as
+      # info, not wait for a flood.
+      - alert: PgllensReadOnlyGateRejection
+        expr: sum(increase(pgllens_tool_calls_total{outcome="rejected"}[15m])) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "pgllens read-only gate rejected a query"
+          description: >-
+            At least one tool call was refused by the safety gate in the last 15m.
+            Pull the audit trail for outcome="rejected" to see the client and args_hash.
+
+      # Sustained tool-call failure rate. `rejected` is deliberately excluded --
+      # a client sending write SQL the gate correctly refuses is not a server
+      # health problem, and it has its own alert above.
+      - alert: PgllensHighToolErrorRate
+        expr: >-
+          (
+            sum(rate(pgllens_tool_calls_total{outcome=~"db_error|unknown_schema"}[5m]))
+            / sum(rate(pgllens_tool_calls_total[5m]))
+          ) > 0.1
+          and sum(rate(pgllens_tool_calls_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "pgllens tool-call error rate above 10%"
+          description: >-
+            More than 10% of tool calls have failed with db_error/unknown_schema over
+            the last 10m. Check PostgreSQL reachability, the pgllens role's grants
+            (ops/sql/pgllens-role.sql), and the audit trail for which tools are failing.
+
+      # Any connection failure is worth knowing about immediately. A 10m window
+      # with a 1m hold means a single burst is seen on the next evaluation and
+      # pages within a minute; the old [5m]/for:5m pair could only fire during a
+      # sustained outage (promtool test: rules/tests/pgllens.test.yml).
+      - alert: PgllensConnectionErrorsFiring
+        expr: sum(increase(pgllens_connection_errors_total[10m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pgllens is failing to connect to PostgreSQL"
+          description: >-
+            pgllens_connection_errors_total has increased over the last 10m. The
+            configured PostgreSQL host is unreachable, credentials are wrong, or the
+            network path (firewall, VPN, TLS) is broken.
+
+      # Standard scrape-target-down alert -- Prometheus can no longer reach /metrics.
+      - alert: PgllensDown
+        expr: up{job="pgllens"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pgllens is not responding to Prometheus scrapes"
+          description: >-
+            Prometheus has been unable to scrape pgllens:3000/metrics for over 2m.
+            The process may be down, unhealthy, or unreachable on the monitoring network.

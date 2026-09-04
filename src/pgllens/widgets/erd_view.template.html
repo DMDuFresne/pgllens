@@ -1,0 +1,1852 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pgllens — ERD</title>
+<!--==FAVICON==-->
+<style>
+/*==TOKENS==*/
+/*==CSS==*/
+/* ---- widget-specific styles (layout on top of the shared component sheet above) ---- */
+/* The shared sheet sets display:flex on .erd-empty/.erd-banner, which -- being an
+   author rule -- beats the UA's [hidden]{display:none} regardless of specificity.
+   Restate it explicitly so toggling the `hidden` attribute actually hides them. */
+[hidden] { display: none !important; }
+/* The widget's own document must never scroll -- doubly true embedded in a host
+   iframe, where an outer scrollbar reads as broken and fights the host's own
+   scrolling. Fixed viewport box on both html AND body (not just body -- html's
+   own default height is content-driven, and a fractional-pixel mismatch between
+   the two is exactly what produced a stray outer scrollbar); every internal
+   region that needs to scroll (the SVG viewport, the drawer body) opts in on its
+   own with its own overflow:auto. */
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+#viewport svg { width: 100%; height: 100%; display: block; cursor: grab; }
+#viewport svg.panning { cursor: grabbing; }
+.erd-table { position: relative; user-select: none; cursor: grab; }
+.erd-table.dragging { cursor: grabbing; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.erd-table.search-dim { opacity: .22; }
+.erd-table.search-match { outline: 2px solid var(--green); outline-offset: 1px; }
+/* Related (FK-neighbour, not directly requested) tables are dimmed via opacity, PLUS
+   badged and dashed-bordered so the meaning is unmistakable even where opacity alone
+   is subtle. Opacity was originally dropped because a connector drawn behind a
+   translucent card showed through it and read as two overlapping tables -- that was
+   actually an edge-ROUTING bug (edges could be positioned underneath any card,
+   related or not). The router now treats every card, related or not, as an obstacle
+   (see hClear/vClear in the script below), so no edge is ever positioned under a
+   related card's rectangle and the transparency is safe to restore. .6 keeps it
+   clearly dimmer than a normal card while the badge/border/title stay legible. */
+.erd-table.related { background: var(--panel-inset); border-style: dashed; opacity: .6; }
+.erd-related-badge { color: var(--blue); border-color: var(--blue); }
+.erd-table-head { display: flex; align-items: center; gap: .4rem; }
+.erd-kind { font-family: var(--font-caps); font-size: .62rem; letter-spacing: .1em;
+        text-transform: uppercase; color: var(--muted); border: 1px solid var(--edge);
+        border-radius: 999px; padding: 1px 6px; flex: none; }
+.erd-table-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.erd-rowcount { margin-left: auto; flex: none; color: var(--muted); font-family: var(--font-mono);
+        font-size: .68rem; font-weight: 400; }
+.erd-table-col .col-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.erd-flag { font-family: var(--font-caps); font-size: .62rem; font-weight: 700;
+        letter-spacing: .04em; flex: none; }
+.erd-edge.dimmed { opacity: .15; }
+.erd-edge.hover { stroke: var(--blue); stroke-width: 2.5; }
+/* ---- ONE compact toolbar, top-right (the shared sheet's default anchor), identical
+   at every width: search, zoom, fit, fullscreen, copy in a single row. It used to be
+   a bottom-centre bar plus a lone top-left search pill, which reserved a full band
+   of the canvas at BOTH edges; one row in one corner gives that height back to the
+   diagram (see topChromeInset). flex-wrap lets it reflow if a 320px phone runs out
+   of room. Every button carries its meaning via aria-label + title (tooltip for
+   mouse, accessible name for a screen reader); the glyph is decoration on top. */
+.erd-controls { flex-wrap: wrap; justify-content: flex-end; gap: .3rem; align-items: center;
+        max-width: calc(100% - 24px); }
+/* The drawer as a wide side panel (40%, see .erd-detail.wide) would cover the
+   toolbar's corner -- slide the toolbar left of it so zoom/fit stay reachable. */
+.erd-canvas:has(.erd-detail.wide:not([hidden])) .erd-controls { right: calc(max(40%, 280px) + 12px); }
+.erd-btn { min-width: 36px; min-height: 36px; padding: .35rem; font-size: 0; }
+.erd-btn::after { font-size: 1rem; }
+/* Real disabled state, not just visual -- e.g. the fullscreen button while its
+   ui/request-display-mode call is in flight (see requestFullscreen()). */
+.erd-btn:disabled { opacity: .35; cursor: not-allowed; }
+#zoom-out::after { content: "\2212"; }
+#zoom-in::after { content: "\FF0B"; }
+#fit::after { content: "\26F6"; font-size: 1rem; }
+#fullscreen::after { content: "\2922"; }
+#copy-mermaid::after { content: "\29C9"; }
+#detail-close::after { content: "\2715"; }
+.erd-zoom-pct { font: 11px var(--font-mono); color: var(--muted); align-self: center;
+        padding: 0 2px; min-width: 3.2em; text-align: center; }
+.erd-btn[aria-pressed="true"] { border-color: var(--green); color: var(--green); }
+/* One search affordance everywhere: a 36px icon pill (a magnifying-glass background
+   image, since generated content on <input> itself is unreliable cross-browser) that
+   expands on focus/non-empty. Sits INSIDE the toolbar row (position:static overrides
+   the shared sheet's absolute top-left anchor) rather than floating alone in the
+   opposite corner. */
+.erd-search {
+  position: static; width: 36px; min-height: 36px; padding: .4rem; transition: width .15s ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9a92' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: center; background-size: 18px;
+}
+.erd-search::placeholder { color: transparent; }
+.erd-search:focus, .erd-search:not(:placeholder-shown) {
+  width: min(220px, calc(100vw - 32px)); background-image: none;
+}
+/* ONE positioned container for both top-left chrome notices (see the markup
+   comment above #chrome-top) -- they used to be two independently
+   absolute-positioned elements (legend top-left, chrome-note top-right) sized
+   at up to 260px each, which fit fine ALONE but overlapped head-on the moment
+   both were visible at once on anything narrower than ~520px wide (a real,
+   demonstrated bug, not hypothetical: a narrow container with both a related-table
+   legend and a clipboard-fallback notice). Stacking them in one flex column
+   makes "both visible" just... two rows, at every width. */
+.erd-chrome-top { position: absolute; top: 12px; left: 12px; z-index: 2;
+        display: flex; flex-direction: column; gap: .4rem;
+        width: min(260px, calc(100vw - 32px)); }
+/* Narrower than this, the top-left notices and the top-right toolbar share one row
+   and collide (measured 143px of overlap at 380px) -- drop the notices under the
+   toolbar. A position offset, not a chrome "mode"; topChromeInset already reserves
+   whichever of the two ends lower. */
+@media (max-width: 639px) { .erd-chrome-top { top: 56px; } }
+.erd-legend, .erd-chrome-note {
+        font: 11px/1.4 var(--font-brand); color: var(--muted); background: var(--panel);
+        border: 1px solid var(--edge); border-radius: var(--r-sm); padding: .4rem .6rem; }
+.erd-legend .dash { display: inline-block; width: 16px; border-top: 1px dashed var(--muted);
+        vertical-align: middle; margin-right: 3px; }
+/* Tighter than the shared component sheet's .6rem/.85rem -- the banner eats into
+   fitAll's reserved bottom inset (see bottomChromeInset), so every px here is a px
+   the diagram itself gets back at fit time. Anchored bottom:12px by the shared
+   sheet; nothing else lives on the bottom edge any more. */
+.erd-banner { padding: .4rem .7rem; }
+#world.smooth { transition: transform .22s ease; }
+@media (prefers-reduced-motion: reduce) { #world.smooth { transition: none; } }
+
+/* touch-action:none stops the browser's own scroll/pinch-zoom from competing with
+   this widget's own Pointer Events pan/drag/pinch handling (mobile chat embeds this
+   inline in a narrow scrollable column -- without this a one-finger drag on the
+   canvas would scroll the CHAT, not pan the diagram). Same rule at every width;
+   nothing here is a breakpoint. */
+.erd-viewport, #viewport svg, .erd-table { touch-action: none; }
+
+/* Host-driven re-theme (ui/notifications/host-context-changed, params.theme). The
+   design system only ships one (dark, "chalkboard") palette today -- this is a
+   minimal, real light override of the same custom properties every rule above
+   already reads, not a second design system. Applied by setting
+   documentElement.dataset.theme from applyHostContext() in the script below. */
+:root[data-theme="light"] {
+  --bg: #f5f5f2; --panel: #ffffff; --panel-inset: #eeeeea; --ink: #1c1c1c;
+  --muted: #66665e; --edge: #d8d8d2;
+}
+</style>
+</head>
+<body>
+<div class="erd-canvas" id="canvas">
+
+  <!-- Legend and chrome-note are two INDEPENDENT chrome notices that can both be
+       visible at once (a truncated related-table legend AND a transient
+       clipboard-fallback message) -- one flow container so they stack vertically
+       instead of both being independently top-left/top-right-absolute-positioned
+       and overlapping each other on a narrow container (they used to; see
+       chrome-top's own CSS comment). -->
+  <div class="erd-chrome-top" id="chrome-top">
+    <div class="erd-legend" id="legend" hidden></div>
+    <div class="erd-chrome-note" id="chrome-note" hidden></div>
+  </div>
+
+  <div class="erd-controls" role="group" aria-label="view controls">
+    <input id="search" class="erd-search" type="search" placeholder="search tables…"
+           aria-label="filter tables by name" title="Search tables">
+    <button type="button" id="zoom-out" class="erd-btn" aria-label="zoom out" title="Zoom out">−</button>
+    <span class="erd-zoom-pct" id="zoom-pct">100%</span>
+    <button type="button" id="zoom-in" class="erd-btn" aria-label="zoom in" title="Zoom in">＋</button>
+    <!-- No separate "reset zoom" button: resetView()/the keyboard "0" shortcut both
+         just call fitOverview(), identically to the Fit button -- a second button doing
+         the exact same thing was dead weight. -->
+    <button type="button" id="fit" class="erd-btn" aria-label="fit diagram to view" title="Fit to view">Fit</button>
+    <button type="button" id="fullscreen" class="erd-btn" aria-label="expand to fullscreen"
+            title="Expand to fullscreen" hidden>Fullscreen</button>
+    <button type="button" id="copy-mermaid" class="erd-btn primary"
+            aria-label="copy Mermaid erDiagram text" title="Copy Mermaid text">Copy Mermaid</button>
+  </div>
+
+  <div class="erd-viewport" id="viewport">
+    <svg id="erd-svg" role="img" aria-label="entity relationship diagram">
+      <defs>
+        <!-- crow's-foot ("many") at the FK-owning end; a single tick ("one") at the
+             referenced end: classic ERD notation, kept intentionally minimal. -->
+        <marker id="erd-many" markerWidth="14" markerHeight="14" refX="10" refY="6"
+                orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M1,1 L10,6 L1,11 M1,6 L10,6" fill="none" stroke="var(--edge)" stroke-width="1.4"/>
+        </marker>
+        <marker id="erd-one" markerWidth="10" markerHeight="14" refX="6" refY="6"
+                orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M6,1 L6,11" fill="none" stroke="var(--edge)" stroke-width="1.4"/>
+        </marker>
+      </defs>
+      <g id="world">
+        <g id="edges-layer"></g>
+        <g id="nodes-layer"></g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="erd-empty" id="empty" hidden>
+    <div class="erd-empty-title" id="empty-title">waiting for data</div>
+    <div id="empty-detail">This widget renders once the host sends the diagram.</div>
+  </div>
+
+  <div class="erd-banner" id="banner" hidden>
+    <span><b>Advisory.</b> <span id="banner-text"></span></span>
+  </div>
+
+  <!-- Drill-down drawer (Task 6.3): opened by tapping/clicking a card (openDetail(),
+       see the script below). Three lazily-fetched, per-table-cached sections, each
+       backed by exactly one allowlisted tool -- get_sample_data / describe_table /
+       get_table_stats -- called over the standard tools/call method. `query` is
+       model-only and is never called from here; there is no free-text SQL affordance. -->
+  <div class="erd-detail" id="detail" hidden role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <div class="erd-detail-header">
+      <span class="erd-detail-title" id="detail-title"></span>
+      <button type="button" id="detail-close" class="erd-btn" aria-label="close table details" title="Close">Close</button>
+    </div>
+    <div class="erd-detail-tabs" role="tablist" aria-label="table detail sections">
+      <button type="button" id="detail-tab-rows" class="erd-detail-tab" role="tab" aria-selected="true">Sample rows</button>
+      <button type="button" id="detail-tab-columns" class="erd-detail-tab" role="tab" aria-selected="false">Columns</button>
+      <button type="button" id="detail-tab-stats" class="erd-detail-tab" role="tab" aria-selected="false">Statistics</button>
+    </div>
+    <!-- get_sample_data rejects limit > 20 -- these are the only values ever offered. -->
+    <div class="erd-detail-limit" id="detail-limit" role="group" aria-label="sample row limit">
+      <button type="button" class="erd-detail-limit-btn" data-limit="5" aria-label="5 rows">5</button>
+      <button type="button" class="erd-detail-limit-btn" data-limit="10" aria-label="10 rows">10</button>
+      <button type="button" class="erd-detail-limit-btn" data-limit="20" aria-label="20 rows">20</button>
+    </div>
+    <!-- Our tools return markdown STRINGS. Rendered as child blocks (a real <table>
+         for a pipe table, <h4> for a heading, <pre> for the rest) built via
+         createElement + textContent below -- never innerHTML -- so a table/column
+         name or cell value containing markup can never execute. Deliberately simple:
+         a tiny table/heading renderer, not a markdown parser; swap in a real renderer
+         (e.g. `marked`) here if it proves too rough. -->
+    <div class="erd-detail-body" id="detail-body" tabindex="-1" role="tabpanel"></div>
+  </div>
+</div>
+
+<!-- The host replaces this block's contents with build_erd's to_dict() shape (see
+     erd/model.py), OR feeds the same shape over the MCP Apps ui bridge (window.__ERD_DATA__
+     or a `message` event carrying `structuredContent`). The empty default below means
+     "nothing baked -- wait for the bridge" (see boot()).
+     {
+       "database": "AdventureWorks", "truncated": false, "note": null, "mermaid": "erDiagram...",
+       "nodes": [ {"schema":"dbo","table":"Orders","kind":"table","rows":1234,
+                   "description":null,"related":false,
+                   "columns":[{"name":"OrderId","type":"int","nullable":false,
+                               "is_pk":true,"is_fk":false}]} ],
+       "edges": [ {"from":{"schema":"dbo","table":"Orders","column":"CustomerId"},
+                   "to":{"schema":"dbo","table":"Customer","column":"CustomerId"},
+                   "constraint":"FK_Orders_Customer"} ]
+     }
+-->
+<script id="erd-data" type="application/json">
+{}
+</script>
+
+<script>
+"use strict";
+// =============================================================================
+// pgllens ERD widget. No framework, no build step -- one plain script, read
+// top-to-bottom: data ingestion -> layout -> render -> pan/zoom -> drag.
+// Deliberately no file export (SVG/PNG download): every browser-native save
+// path is blocked by the widget's sandboxed iframe, and the one host bridge
+// method that could do it, ui/download-file, is draft-only (PR #475) and
+// absent from 2026-01-26, the revision Claude negotiates. Don't re-add an
+// export button until a host actually advertises a working download path.
+// =============================================================================
+
+// ---- geometry constants (card sizing + layered layout gutters) ----
+// HEADER_H/ROW_H are calibrated a hair above the component sheet's actual rendered
+// row heights (measured: ~37px header, ~30px per column row at the default font
+// size) so a foreignObject box is never a pixel short of its own content -- a short
+// box clips silently (foreignObject overflow), which is worse than a little slack.
+const HEADER_H = 40, ROW_H = 31, PAD_BOTTOM = 4;
+const CARD_MIN_W = 210, CARD_MAX_W = 480; // content-fit width is clamped to this range
+const GUTTER_X = 90, GUTTER_Y = 28;
+// GUTTER_X (90px) is tuned to leave room for an ELBOW EDGE routed between two
+// FK-dependency columns WITHIN one component (layoutComponent) -- no edge is ever
+// routed BETWEEN two separate connected components (there's no FK relationship to
+// draw), so packing components against each other (layoutErd) only needs enough gap
+// to read as two distinct tables, not a full routing lane. A tighter, separate
+// constant here measurably shrinks the packed bounding box on a real schema with
+// many single-table components.
+const PACK_GAP = 24;
+const MIN_K = 0.15, MAX_K = 4, WHEEL_SENS = 0.0016, STEP_K = 1.25;
+const GRID = 10; // light snap grid for dropped cards
+
+// ---- mutable widget state ----
+let DATA = null;                 // the last rendered payload (to_dict() shape)
+let POS = {};                    // "schema.table" -> {x,y,w,h}; persists across re-renders
+let VIEW = { x: 0, y: 0, k: 1 };  // overwritten by fitAll() on the first successful render
+let HAS_FITTED_ONCE = false;     // only auto-fit the very first render, never a later bridge push
+let USER_ADJUSTED_VIEW = false;  // set once the user pans/zooms manually; gates auto-refit on resize
+let MAIN_COMP = [];              // keys of the largest connected component (set by layoutErd)
+let DRAG = null;                 // active card drag: {key, startX, startY, origX, origY}
+let PAN = null;                  // active canvas pan: {startX, startY, origX, origY}
+
+// ---- small utilities ----
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+function key(schema, table) { return schema + "." + table; }
+function fmtRows(n) { return n == null ? "" : Number(n).toLocaleString() + " rows"; }
+const $ = id => document.getElementById(id);
+
+// One offscreen canvas reused for all text measurement (card sizing needs this so
+// a card is never sized narrower than the text it actually has to hold).
+// `letterSpacingPx` matters here: erd-kind/erd-flag set letter-spacing in the component
+// sheet, and the `font` shorthand alone doesn't account for it -- skipping it under-
+// measures short badge text like "RELATED" enough to matter at this scale.
+let _measureCtx = null;
+function textWidth(text, font, letterSpacingPx) {
+  if (!_measureCtx) _measureCtx = document.createElement("canvas").getContext("2d");
+  _measureCtx.font = font;
+  if ("letterSpacing" in _measureCtx) _measureCtx.letterSpacing = `${letterSpacingPx || 0}px`;
+  return _measureCtx.measureText(String(text == null ? "" : text)).width;
+}
+
+// =============================================================================
+// Data ingestion: the baked <script id="erd-data"> block (render_erd_view's
+// server-side templating path, used by our own live-verification harness and any
+// pre-Apps/legacy caller), OR the real MCP Apps host bridge below. The baked block
+// ships as the empty default {} on purpose -- absent that, the widget waits quietly
+// for the bridge instead of treating "no data yet" as an error.
+// =============================================================================
+function readBakedData() {
+  try {
+    const raw = ($("erd-data").textContent || "").trim();
+    const parsed = JSON.parse(raw || "{}");
+    return Object.keys(parsed).length ? parsed : null;
+  } catch (e) {
+    return null; // malformed baked JSON is treated the same as "no data yet"
+  }
+}
+function boot() {
+  const initial = readBakedData();
+  // SUPERSET PROPERTY -- load-bearing, do not "simplify" away: this widget must be
+  // correct under every reading of the 2026-01-26 spec. render() on baked/standalone
+  // data happens HERE, unconditionally, before the bridge handshake even starts; the
+  // bridge's own "ui/notifications/tool-result" handler (below) is its own branch,
+  // never gated behind bridge.connect() resolving. Three research passes disagreed
+  // on handshake-vs-data ordering and the installed SDK has no ui/* names to check
+  // against, so rather than betting on one sequence, both paths are always live:
+  // baked/standalone data renders immediately, AND a host push is accepted the
+  // instant it arrives, whichever comes first, with or without a completed handshake.
+  if (initial) render(initial); else showWaiting();
+  bridge.connect().then(ctx => {
+    // ctx is null when unembedded, or when the host never answered ui/initialize
+    // within the bounded wait (see HOST_INIT_TIMEOUT_MS) -- either way, fall back to
+    // whatever is already on screen (the baked render above, or the waiting state)
+    // rather than hanging on a blank frame forever.
+    if (ctx) {
+      applyHostContext(ctx);
+      $("fullscreen").hidden = !fullscreenAdvertised(bridge.capabilities, ctx);
+    }
+  });
+}
+
+// =============================================================================
+// MCP Apps host bridge: JSON-RPC 2.0 over postMessage, per the ext-apps spec
+// (2026-01-26, https://github.com/modelcontextprotocol/ext-apps). Only relevant
+// when actually embedded in a host iframe (window.self !== window.top) -- the
+// data-baked path above never touches this. Things the spec requires, implemented
+// literally rather than guessed at:
+//   1. The View (this widget) INITIATES: it sends "ui/initialize" first, then,
+//      once the host replies, sends "ui/notifications/initialized". The spec is
+//      explicit that "Host MUST NOT send any request or notification to the View
+//      before it receives an `initialized` notification". But see the SUPERSET
+//      PROPERTY note on boot() above -- render() never actually waits on this;
+//      the handshake exists so a spec-compliant host feels free to push data, not
+//      because this widget refuses data without it.
+//   2. Diagram data arrives as a "ui/notifications/tool-result" notification
+//      (JSON-RPC, `params.structuredContent`) -- not a bare `{structuredContent}`
+//      object on the message event, which was this widget's previous (spec-
+//      incorrect, never-verified-against-a-real-host) assumption. Handled in its
+//      OWN branch in the message listener below, independent of handshake state.
+//   3. "ui/request-display-mode" (see requestFullscreen()) lets the widget ask for
+//      more room. The response returns the mode the host actually set (which may
+//      differ from the request); refusal behaviour is unspecified, so any error
+//      is treated the same as denial and the control just restores its prior state.
+//   4. "ui/notifications/host-context-changed" pushes updated theme/
+//      containerDimensions/displayMode after the initial handshake -- handled by
+//      applyHostContext() below.
+//   5. "ui/resource-teardown" is a REQUEST (it carries an `id`), not a
+//      notification -- silence is not a valid answer. It means the host is about
+//      to hide/destroy this view: stop timers/observers, then respond.
+//   6. "ui/notifications/size-changed" is emitted (never awaited, never gates
+//      anything) so a host that reads it can size the surrounding frame. One
+//      research pass placed this in the ext-apps DRAFT only; sending an unknown
+//      notification is harmless to a host that doesn't recognize it, so it is
+//      emitted unconditionally rather than bet on which revision defines it.
+// ui/download-file: this DOES exist, but only in the ext-apps DRAFT (added by
+// PR #475, Feb 2026) -- it is ABSENT from 2026-01-26, the revision this widget
+// negotiates, so calling it would silently do nothing in Claude Desktop today.
+// There is also no `downloadFile` host helper -- taking (data, filename,
+// mimeType) -- in any revision found; that was a blog paraphrase, not spec
+// text. This widget has no file export at all as a result -- see the header
+// comment at the top of this script. Re-check the ext-apps spec when planning
+// the next upgrade in case ui/download-file has since gone stable.
+// tools/call (server tool calls) is the standard method the spec defines --
+// used by the drill-down drawer below (get_sample_data/describe_table/
+// get_table_stats); `query` is model-only and never called from here.
+// =============================================================================
+const MCP_UI_PROTOCOL_VERSION = "2026-01-26";
+// Bounded wait for the host's ui/initialize reply -- there was previously no
+// timeout at all, so a host that never answers left the widget sitting on
+// whatever boot() rendered with no path forward. 1.5s is generous for a same-
+// process postMessage round trip and short enough a human notices nothing hung.
+const HOST_INIT_TIMEOUT_MS = 1500;
+
+const bridge = (() => {
+  let msgId = 1;
+  const pending = new Map(); // outstanding request id -> {resolve, reject}
+  const handlers = {};       // notification method -> [fn, ...]
+  let capabilities = null;   // the host's hostCapabilities, once known
+  let hostContext = null;    // the latest hostContext (initial + host-context-changed merges)
+
+  function embedded() { return window.self !== window.top; }
+  function post(payload) {
+    if (!embedded()) return; // not embedded -- nothing to shake hands with
+    window.parent.postMessage(payload, "*");
+  }
+  function call(method, params) {
+    return new Promise((resolve, reject) => {
+      if (!embedded()) { reject(new Error("not embedded in a host")); return; }
+      const id = msgId++;
+      pending.set(id, { resolve, reject });
+      post({ jsonrpc: "2.0", id, method, params: params || {} });
+    });
+  }
+  function notify(method, params) {
+    post({ jsonrpc: "2.0", method, params: params || {} });
+  }
+  function on(method, fn) {
+    (handlers[method] = handlers[method] || []).push(fn);
+  }
+  function respond(id, result) {
+    post({ jsonrpc: "2.0", id, result: result || {} });
+  }
+
+  window.addEventListener("message", ev => {
+    const msg = ev.data;
+    if (!msg || typeof msg !== "object") return;
+    if ("id" in msg && msg.id != null && pending.has(msg.id) &&
+        ("result" in msg || "error" in msg)) {
+      const { resolve, reject } = pending.get(msg.id);
+      pending.delete(msg.id);
+      if (msg.error) reject(msg.error); else resolve(msg.result);
+      return;
+    }
+    if (msg.method === "ui/resource-teardown") {
+      // A REQUEST, not a notification -- it needs a reply, not silence.
+      teardown();
+      if ("id" in msg && msg.id != null) respond(msg.id, {});
+      return;
+    }
+    if (msg.method === "ui/notifications/tool-result" && msg.params) {
+      // Own branch, independent of handshake state -- see the SUPERSET PROPERTY
+      // comment above boot(). Data is accepted the instant it arrives.
+      const sc = msg.params.structuredContent;
+      if (sc && typeof sc === "object") render(sc);
+      return;
+    }
+    if (msg.method === "ui/notifications/host-context-changed" && msg.params) {
+      applyHostContext(msg.params);
+      hostContext = Object.assign({}, hostContext, msg.params);
+      return;
+    }
+    if (msg.method && handlers[msg.method]) handlers[msg.method].forEach(fn => fn(msg.params));
+  });
+
+  function connect() {
+    if (!embedded()) return Promise.resolve(null);
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = ctx => { if (!settled) { settled = true; resolve(ctx); } };
+      // Never hang: if the host doesn't answer within the bound, fall back to
+      // whatever boot() already rendered rather than sitting on a blank frame.
+      const timer = setTimeout(() => finish(null), HOST_INIT_TIMEOUT_MS);
+      call("ui/initialize", {
+        // ext-apps ui/initialize params: the view identifies itself with `appInfo`
+        // (NOT the MCP-core `clientInfo`/`capabilities` names). The reference widget
+        // shape claude.ai renders sends exactly this; sending `clientInfo`/`capabilities` made a
+        // strict host reject the handshake, so it never sent tool-result and the panel
+        // stayed blank.
+        appInfo: { name: "pgllens-erd-view", version: "1" },
+        protocolVersion: MCP_UI_PROTOCOL_VERSION,
+        appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+      }).then(result => {
+        clearTimeout(timer);
+        capabilities = (result && result.hostCapabilities) || {};
+        hostContext = (result && result.hostContext) || {};
+        // Spec-required: the host must not send anything before this arrives.
+        notify("ui/notifications/initialized", {});
+        finish(hostContext);
+      }).catch(() => { clearTimeout(timer); finish(null); });
+    });
+  }
+
+  return {
+    connect, call, notify, on,
+    get capabilities() { return capabilities; },
+    get hostContext() { return hostContext; },
+  };
+})();
+
+function fullscreenAdvertised(capabilities, hostContext) {
+  const modes = (capabilities && capabilities.availableDisplayModes) ||
+    (hostContext && hostContext.availableDisplayModes) || [];
+  return Array.isArray(modes) && modes.includes("fullscreen");
+}
+function updateDisplayModeChrome(mode) {
+  const btn = $("fullscreen");
+  const isFullscreen = mode === "fullscreen";
+  btn.setAttribute("aria-pressed", String(isFullscreen));
+  btn.title = isFullscreen ? "Exit fullscreen" : "Expand to fullscreen";
+}
+// ui/notifications/host-context-changed: re-theme on theme, re-fit on
+// containerDimensions, adjust chrome on displayMode. Each field is independent --
+// a host may send just one of them -- so each is applied only when present.
+function applyHostContext(ctx) {
+  if (!ctx) return;
+  if ("theme" in ctx) document.documentElement.dataset.theme = ctx.theme === "light" ? "light" : "dark";
+  if ("containerDimensions" in ctx) scheduleRefit();
+  if ("displayMode" in ctx) updateDisplayModeChrome(ctx.displayMode);
+}
+async function requestFullscreen() {
+  const btn = $("fullscreen");
+  const prevPressed = btn.getAttribute("aria-pressed");
+  btn.disabled = true;
+  try {
+    const result = await bridge.call("ui/request-display-mode", { mode: "fullscreen" });
+    updateDisplayModeChrome((result && result.mode) || "fullscreen");
+  } catch (e) {
+    // Host refused (error response) or the call otherwise failed -- treat as
+    // denial and restore the control's prior state; never let this throw.
+    if (prevPressed === null) btn.removeAttribute("aria-pressed");
+    else btn.setAttribute("aria-pressed", prevPressed);
+  } finally {
+    btn.disabled = false;
+  }
+}
+// ui/resource-teardown: stop timers/observers. The message listener itself stays
+// (it still needs to answer this very request, and any later message), but
+// nothing that fires on its own should keep running once the host says it's
+// tearing this view down.
+function teardown() {
+  clearTimeout(_resizeTimer);
+  clearTimeout(_chromeNoteTimer);
+  if (_resizeObserver) _resizeObserver.disconnect();
+}
+// ui/notifications/size-changed: informational only, per the comment on the
+// bridge above -- never awaited, never gates rendering. Asks for the height the
+// DIAGRAM wants -- the laid-out bounding box at 100% zoom plus the toolbar chrome
+// -- not the canvas's own measured height (that was just the host's frame echoed
+// straight back, so the host could never learn it had sized us too small).
+// Floored at 600px, capped at the host's containerDimensions.maxHeight when it
+// gives one (else the screen height, so we never ask for a frame taller than the
+// display); deduped so a steady state doesn't spam the host on every refit.
+const MIN_DESIRED_H = 600;
+let _lastEmittedHeight = null;
+function maybeEmitSizeChanged() {
+  const vp = $("viewport").getBoundingClientRect();
+  let h = Math.max(MIN_DESIRED_H,
+    Math.ceil(computeBBox().h + topChromeInset(vp) + bottomChromeInset(vp) + FIT_PAD));
+  const maxH = bridge.hostContext?.containerDimensions?.maxHeight;
+  h = Math.min(h, maxH > 0 ? maxH : (window.screen && window.screen.height) || 1400);
+  if (h !== _lastEmittedHeight) {
+    _lastEmittedHeight = h;
+    bridge.notify("ui/notifications/size-changed", { height: h });
+  }
+}
+
+// =============================================================================
+// Layout: deterministic, layered/columnar, no physics. Roots (no outgoing FK)
+// sit in column 0; every other table sits one column right of the deepest table
+// it references (longest path). Cycles (including a self-referencing FK) are
+// broken by simply not letting a revisit extend the depth -- same idea as a
+// DFS back-edge exclusion, just inlined into the memoized walk.
+// =============================================================================
+// Card width fits its content (qualified name + row count in the header, each column's
+// name/flag/type in the body) instead of a fixed guess -- a fixed width was truncating
+// realistic names ("dbo.ShipmentLog" -> "dbo.Ship..."), which is unacceptable when the
+// name is the single most important text on the card. Measured via canvas so it's exact
+// for whatever font actually rendered, then clamped to a sane min/max; the CSS
+// `text-overflow:ellipsis` + `title=` attribute stay as a fallback for a name past the max.
+// Font metrics below are the component sheet's ACTUAL computed pixel sizes (its rem
+// values against the page's 16px root), not a rough guess -- an earlier version guessed
+// smaller sizes than the CSS really uses, under-measured every string, and truncated
+// names anyway despite "measuring" them. FLEX_GAP/PAD mirror the CSS gap/padding on
+// .erd-table-head and .erd-table-col so the sum is a real minimum, not an estimate.
+const FONT_HEAD = t => `600 13.6px ${t.fontCaps}`;       // .erd-table-head: .85rem/600
+const FONT_BADGE = t => `400 9.92px ${t.fontCaps}`;      // .erd-kind: .62rem, letter-spacing .1em
+const FONT_ROW = t => `400 12.48px ${t.fontMono}`;       // .erd-table-col: .78rem
+const FONT_FLAG = t => `700 9.92px ${t.fontCaps}`;       // .erd-flag: .62rem/700, letter-spacing .04em
+const FONT_ROWCOUNT = t => `400 10.88px ${t.fontMono}`;  // .erd-rowcount: .68rem
+const HEAD_PAD_X = 12, HEAD_GAP = 6.4;                   // .erd-table-head: padding .5rem .75rem, gap .4rem
+const ROW_PAD_X = 12, ROW_GAP = 8;                       // .erd-table-col: padding .32rem .75rem, gap .5rem
+const SAFETY = 12; // rounding/kerning slack -- cheap insurance against a fresh truncation report
+function cardSize(node) {
+  const t = designTokens();
+  const cols = node.columns || [];
+  const badge = (node.kind || "").toUpperCase();
+  const badgeW = 14 + textWidth(badge, FONT_BADGE(t), 0.992); // pill padding+border, see erd-kind CSS
+  const qualified = `${node.schema}.${node.table}`;
+  const rowsText = node.rows == null ? "" : fmtRows(node.rows);
+
+  let headerW = HEAD_PAD_X * 2 + badgeW + HEAD_GAP + textWidth(qualified, FONT_HEAD(t));
+  if (node.related) headerW += HEAD_GAP + (14 + textWidth("RELATED", FONT_BADGE(t), 0.992));
+  if (rowsText) headerW += HEAD_GAP + textWidth(rowsText, FONT_ROWCOUNT(t));
+
+  const rowW = c => {
+    const flagW = (c.is_pk || c.is_fk) ? ROW_GAP + textWidth(c.is_pk ? "PK" : "FK", FONT_FLAG(t), 0.397) : 0;
+    return ROW_PAD_X * 2 + 6 /* nullability dot */ + ROW_GAP + textWidth(c.name, FONT_ROW(t)) +
+      flagW + ROW_GAP + textWidth(c.type, FONT_ROW(t));
+  };
+  const bodyW = cols.length ? Math.max(...cols.map(rowW))
+    : ROW_PAD_X * 2 + textWidth("(no columns)", FONT_ROW(t));
+
+  const w = clamp(Math.max(headerW, bodyW) + SAFETY, CARD_MIN_W, CARD_MAX_W);
+  return { w, h: HEADER_H + Math.max(1, cols.length) * ROW_H + PAD_BOTTOM };
+}
+
+// Belt-and-braces overlap guard: the layered placement below already keeps every column's
+// x-range disjoint and stacks each column's cards with a fixed gutter, so two cards should
+// never overlap by construction -- but "should never" is exactly the kind of claim a caught
+// bug (a user saw two cards visually overlapping) teaches you not to trust unverified. This
+// sweeps every pair after layout and nudges the lower one down until nothing intersects,
+// so a future change to the placement math can't reintroduce a silent overlap on load.
+function resolveOverlaps(pos) {
+  const keys = Object.keys(pos);
+  for (let pass = 0, changed = true; changed && pass < 50; pass++) {
+    changed = false;
+    for (let i = 0; i < keys.length; i++) {
+      for (let j = i + 1; j < keys.length; j++) {
+        const a = pos[keys[i]], b = pos[keys[j]];
+        const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        if (ox > 0 && oy > 0) {
+          if (a.y <= b.y) b.y = a.y + a.h + GUTTER_Y; else a.y = b.y + b.h + GUTTER_Y;
+          changed = true;
+        }
+      }
+    }
+  }
+}
+// A real schema very often has far fewer FK *constraints* than tables (legacy/ORM
+// schemas, application-enforced relationships) -- caught on a live 69-table database
+// where only ~11 edges existed. The original single global column-0 held EVERY
+// unconnected table, producing one comically tall single-file column instead of a
+// diagram. Fix: split into connected components first (undirected reachability over
+// the same FK adjacency), layer each component independently with the exact
+// longest-path algorithm below, then pack the resulting component boxes into a grid
+// shaped like the viewport (see layoutErd/viewportAspect below) instead of one
+// unbroken column.
+function connectedComponents(keys, adj) {
+  const undirected = {};
+  keys.forEach(k => { undirected[k] = new Set(); });
+  keys.forEach(k => adj[k].forEach(t => { undirected[k].add(t); undirected[t].add(k); }));
+  const seen = new Set();
+  const components = [];
+  for (const start of keys) {
+    if (seen.has(start)) continue;
+    const comp = [];
+    const stack = [start];
+    seen.add(start);
+    while (stack.length) {
+      const k = stack.pop();
+      comp.push(k);
+      undirected[k].forEach(n => { if (!seen.has(n)) { seen.add(n); stack.push(n); } });
+    }
+    components.push(comp.sort());
+  }
+  return components;
+}
+// First-fit-decreasing column bin-packing, shared by two call sites: packing whole
+// components against each other (layoutErd) AND packing same-depth siblings within
+// one component (layoutComponent, below) -- same problem at two scales: given boxes
+// of uneven height, stack them into columns capped at `targetH`, preferring the
+// column with the LEAST remaining headroom that still fits (minimizes wasted gaps).
+// Caller sorts `items` tallest-first for the decreasing-height heuristic.
+function binPackColumns(items, targetH, gap) {
+  const columns = []; // { usedH, w, items: [...item, y] }
+  for (const item of items) {
+    let best = null;
+    for (const col of columns) {
+      const newH = col.usedH + (col.items.length ? gap : 0) + item.h;
+      if (newH <= targetH && (!best || col.usedH > best.usedH)) best = col;
+    }
+    if (!best) { best = { usedH: 0, w: 0, items: [] }; columns.push(best); }
+    const y = best.usedH + (best.items.length ? gap : 0);
+    best.items.push({ ...item, y });
+    best.usedH = y + item.h;
+    best.w = Math.max(best.w, item.w);
+  }
+  return columns;
+}
+// Longest-path layered layout for ONE connected component (identical algorithm to the
+// pre-fix global version, just scoped to `comp`/`compSet` instead of every node).
+function layoutComponent(comp, byKey, adj) {
+  const compSet = new Set(comp);
+  const depthMemo = {};
+  function depthOf(k, visiting) {
+    if (k in depthMemo) return depthMemo[k];
+    if (visiting.has(k)) return 0; // cycle/self-loop: don't let it deepen further
+    visiting.add(k);
+    let d = 0;
+    for (const t of adj[k]) {
+      if (t === k || !compSet.has(t)) continue; // self-refs never add depth
+      d = Math.max(d, 1 + depthOf(t, visiting));
+    }
+    visiting.delete(k);
+    depthMemo[k] = d;
+    return d;
+  }
+  comp.forEach(k => depthOf(k, new Set()));
+  const maxDepth = Math.max(0, ...comp.map(k => depthMemo[k]));
+  const layers = Array.from({ length: maxDepth + 1 }, () => []);
+  comp.forEach(k => layers[depthMemo[k]].push(k));
+
+  const pos = {};
+  let x = 0, height = 0;
+  for (let d = 0; d <= maxDepth; d++) {
+    // Order siblings by the barycenter (average y-center) of the nodes they reference
+    // that are already placed (strictly earlier columns) -- an already-positioned
+    // "parent" pulls its dependents toward its own row. Falls back to alphabetical
+    // order (stable) when a node references nothing already placed.
+    const barycenter = k => {
+      const targets = adj[k].filter(t => t !== k && compSet.has(t) && pos[t]);
+      if (!targets.length) return Infinity;
+      const sum = targets.reduce((s, t) => s + pos[t].y + pos[t].h / 2, 0);
+      return sum / targets.length;
+    };
+    const ordered = layers[d]
+      .map((k, idx) => ({ k, idx, bc: barycenter(k) }))
+      .sort((a, b) => (a.bc - b.bc) || (a.idx - b.idx))
+      .map(o => o.k);
+    // Deliberately simple: also tried splitting a crowded same-depth layer (siblings that
+    // all reference one common table, e.g. five real tables that only reference
+    // UserAccount) into sub-columns, both via full area-based bin-packing and via a
+    // fixed 2-way round-robin split. Both measured net-NEUTRAL to net-WORSE on the
+    // real 60-table schema: shortening one tall layer just makes total WIDTH the
+    // new binding constraint at essentially the same overall fitted zoom, because
+    // total content area is fixed (some real tables genuinely have 40+ columns) and
+    // this diagram is already close to that content's practical packing ceiling.
+    // layoutErd's cross-component bin-packing (below) is where the real 60→69-table
+    // schema's fix actually paid off; simpler code here, same result.
+    let y = 0, colW = CARD_MIN_W;
+    for (const k of ordered) colW = Math.max(colW, cardSize(byKey[k]).w);
+    for (const k of ordered) {
+      const sz = cardSize(byKey[k]);
+      pos[k] = { x, y, w: sz.w, h: sz.h };
+      y += sz.h + GUTTER_Y;
+    }
+    height = Math.max(height, y - GUTTER_Y);
+    x += colW + GUTTER_X;
+  }
+  return { pos, w: x - GUTTER_X, h: height };
+}
+// Two packing fixes, in order of discovery, both aimed at the same goal: the FINAL
+// bounding box should be shaped roughly like the viewport (area = w*h, and for a box
+// shaped like the viewport w = h*aspect, so target dimension = sqrt(area*aspect) or
+// sqrt(area/aspect) depending which one you're solving for).
+//   1. A fixed MAX_ROW_W stopped the single-column pileup but ignored the viewport's
+//      actual shape -- a real 60-table schema (mostly single-node components) still
+//      packed a narrow-but-tall ribbon that bottomed fitAll() out at 15% zoom.
+//   2. Row-shelf packing (pack components left-to-right, wrap past a target ROW
+//      width) fixed the ribbon but wasted enormous vertical space: a real schema's
+//      components vary wildly in HEIGHT (a handful of tables with 40+ columns next
+//      to dozens of one-column stragglers), and a shared shelf row's height is its
+//      TALLEST member -- every short component sharing a row with a tall one leaves
+//      blank space under itself. Column bin-packing (below) stacks short components
+//      on top of each other within a column instead, reclaiming that space -- the
+//      same idiom as a masonry/skyline layout.
+function viewportAspect() {
+  const vp = $("viewport").getBoundingClientRect();
+  return (vp.width > 0 && vp.height > 0) ? vp.width / vp.height : 1.6;
+}
+function layoutErd(nodes, edges) {
+  const byKey = {};
+  nodes.forEach(n => { byKey[key(n.schema, n.table)] = n; });
+  const adj = {};
+  Object.keys(byKey).forEach(k => { adj[k] = []; });
+  edges.forEach(e => {
+    const f = key(e.from.schema, e.from.table), t = key(e.to.schema, e.to.table);
+    if (f in adj && t in adj) adj[f].push(t);
+  });
+  Object.keys(adj).forEach(k => { adj[k] = [...new Set(adj[k])]; });
+
+  const keys = Object.keys(byKey).sort(); // alphabetical base order -> deterministic ties
+  const components = connectedComponents(keys, adj);
+  const laidOut = components.map(comp => ({ comp, local: layoutComponent(comp, byKey, adj) }));
+  // Tallest-first is the first-fit-decreasing bin-packing heuristic, applied by HEIGHT
+  // because we bin-pack into COLUMNS (below), not rows -- see that comment for why.
+  laidOut.sort((a, b) => b.local.h - a.local.h);
+
+  const totalArea = laidOut.reduce((s, c) => s + c.local.w * c.local.h, 0);
+  const maxCompH = Math.max(...laidOut.map(c => c.local.h));
+  // area = colH * totalW, and for a box shaped like the viewport totalW = colH*aspect,
+  // so colH = sqrt(area/aspect) -- floored at the single tallest component, since no
+  // column can be shorter than the tallest thing that has to go in some column.
+  const targetColH = Math.max(maxCompH, Math.sqrt(Math.max(totalArea, 1) / viewportAspect()));
+
+  // Bin-pack into columns (top-to-bottom fill, best-fit-decreasing by remaining
+  // headroom) rather than the row-shelf version tried first: a real schema's
+  // components are wildly uneven in HEIGHT (a handful of tables with 40+ columns
+  // next to dozens of single-column stragglers), and packing those into shared ROWS
+  // wastes the row's full height under every short component sharing a row with a
+  // tall one. Stacking short components in the same COLUMN instead reclaims that
+  // space -- same idiom as a masonry/skyline layout.
+  const items = laidOut.map(({ comp, local }) => ({ comp, local, w: local.w, h: local.h }));
+  // The main component -- what the readable default view (fitReadable) centres on:
+  // most tables, ties broken by most FK edges within it. Usually also the tallest,
+  // but not necessarily, so it is looked up by identity below rather than assumed
+  // to be items[0].
+  const edgesIn = comp => { const s = new Set(comp);
+    return edges.filter(e => s.has(key(e.from.schema, e.from.table)) && s.has(key(e.to.schema, e.to.table))).length; };
+  MAIN_COMP = components.reduce((best, c) =>
+    (c.length > best.length || (c.length === best.length && edgesIn(c) > edgesIn(best))) ? c : best, components[0] || []);
+  const main = items.find(i => i.comp === MAIN_COMP) || items[0];
+  // When the main component alone is already WIDER than the viewport-shaped box that
+  // would hold everything (targetColH tall, viewport aspect), the column packer can
+  // only add the remaining components to its right, making an already width-bound
+  // graph wider still. Shelve the rest BELOW it instead: pack them into columns no
+  // taller than the main component (so the shelf never outgrows what it sits under)
+  // and just tall enough that, laid left-to-right, they span roughly its width. Gating
+  // on the main component's own aspect instead was wrong: an FK-less schema (every
+  // component one wide card) collapsed into a single narrow strip.
+  let columns, below = null;
+  if (items.length > 1 && main.w > targetColH * viewportAspect()) {
+    const rest = items.filter(i => i !== main);
+    const restArea = rest.reduce((s, c) => s + c.w * c.h, 0);
+    const restColH = Math.min(main.h, Math.max(...rest.map(c => c.h), restArea / main.w));
+    columns = [{ w: main.w, items: [{ ...main, y: 0 }] }];
+    below = binPackColumns(rest, restColH, PACK_GAP);
+  } else {
+    columns = binPackColumns(items, targetColH, PACK_GAP);
+  }
+
+  const pos = {};
+  const place = (cols, y0) => {
+    let x = 0;
+    for (const col of cols) {
+      for (const { comp, local, y } of col.items) {
+        comp.forEach(k => {
+          const p = local.pos[k];
+          pos[k] = { x: p.x + x, y: p.y + y + y0, w: p.w, h: p.h };
+        });
+      }
+      x += col.w + PACK_GAP;
+    }
+  };
+  place(columns, 0);
+  if (below) place(below, main.h + PACK_GAP);
+  resolveOverlaps(pos); // belt-and-braces: see the function's own comment
+  return pos;
+}
+
+// =============================================================================
+// Render: builds the SVG's nodes-layer (cards, as foreignObjects) and
+// edges-layer (elbow connectors) from DATA + POS, then applies the current
+// pan/zoom. Existing card positions are preserved across a re-render (a bridge
+// push after the user has dragged cards must not undo their arrangement); only
+// genuinely new tables get a fresh layout slot.
+// =============================================================================
+function render(data) {
+  DATA = data;
+  $("empty").hidden = true;
+  $("viewport").hidden = false;
+
+  const nodes = data.nodes || [];
+  if (!nodes.length) {
+    showEmpty("no tables found", "The requested database or filter returned nothing to draw.");
+    return;
+  }
+
+  const fresh = layoutErd(nodes, data.edges || []);
+  const seen = new Set();
+  nodes.forEach(n => {
+    const k = key(n.schema, n.table);
+    seen.add(k);
+    if (!(k in POS)) POS[k] = fresh[k]; // keep any previously-dragged position
+  });
+  Object.keys(POS).forEach(k => { if (!seen.has(k)) delete POS[k]; }); // table dropped
+  // A bridge push can add a brand-new table next to positions the user already dragged
+  // freely (no longer grid-aligned) -- re-run the same overlap guard across everything
+  // currently on the board, not just this render's fresh layout.
+  resolveOverlaps(POS);
+
+  renderBanner(data);
+  renderLegend(nodes);
+  renderNodes(nodes);
+  renderEdges(data.edges || [], nodes);
+  if (!HAS_FITTED_ONCE) {
+    // Frame the diagram legibly on first paint instead of an arbitrary corner/zoom --
+    // subsequent bridge pushes leave the user's own pan/zoom alone.
+    HAS_FITTED_ONCE = true;
+    HOME_FIT();
+  } else {
+    applyView();
+  }
+  maybeEmitSizeChanged(); // the layout (and so the height we'd like) may have changed
+
+  const summary = `${nodes.length} table${nodes.length === 1 ? "" : "s"}, ` +
+    `${(data.edges || []).length} relationship${(data.edges || []).length === 1 ? "" : "s"}`;
+  $("erd-svg").setAttribute("aria-label", `entity relationship diagram: ${summary}`);
+}
+
+function showWaiting() { showEmpty("waiting for data", "This widget renders once the host sends the diagram."); }
+function showEmpty(title, detail) {
+  $("empty-title").textContent = title;
+  $("empty-detail").textContent = detail;
+  $("empty").hidden = false;
+  $("viewport").hidden = true;
+  $("banner").hidden = true;
+}
+
+function renderBanner(data) {
+  const banner = $("banner");
+  if (data.truncated && data.note) {
+    $("banner-text").textContent = data.note;
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
+}
+
+// Related (FK-neighbour) tables are dashed + badged (see cardHtml), but that convention
+// still needs to be NAMED once for someone opening the diagram cold -- shown only when
+// at least one related table is actually present, so it never clutters a normal render.
+function renderLegend(nodes) {
+  const legend = $("legend");
+  const any = nodes.some(n => n.related);
+  legend.hidden = !any;
+  if (any) {
+    legend.innerHTML = '<span class="dash" aria-hidden="true"></span>' +
+      "Dashed = related table, included so no relationship is left dangling.";
+  }
+}
+
+function columnRow(c) {
+  const flag = c.is_pk ? '<span class="erd-flag erd-pk">PK</span>'
+    : c.is_fk ? '<span class="erd-flag erd-fk">FK</span>' : "";
+  return `<div class="erd-table-col">
+    <span class="erd-null${c.nullable ? "" : " required"}" title="${c.nullable ? "nullable" : "not null"}"></span>
+    <span class="col-name">${esc(c.name)}</span>
+    ${flag}
+    <span class="col-type">${esc(c.type)}</span>
+  </div>`;
+}
+// Related (FK-neighbour, not directly requested) tables are dimmed (CSS opacity, see
+// .erd-table.related) AND badged/dashed/tooltipped -- the opacity alone is often too
+// subtle at a glance, so the badge+border name it explicitly for anyone who needs to
+// be sure. Safe now that the edge router treats every card as an obstacle (see the
+// .erd-table.related CSS comment for the fuller history).
+function cardHtml(n) {
+  const cols = n.columns && n.columns.length
+    ? n.columns.map(columnRow).join("")
+    : '<div class="erd-table-col"><span class="col-name" style="color:var(--muted)">(no columns)</span></div>';
+  const rowText = n.rows == null ? "" : `<span class="erd-rowcount">${fmtRows(n.rows)}</span>`;
+  const cls = "erd-table" + (n.related ? " related" : "");
+  const relatedNote = "Included as a related table (a foreign-key neighbour of a " +
+    "requested table) so its relationship isn't left dangling -- not directly requested.";
+  const relatedBadge = n.related
+    ? `<span class="erd-kind erd-related-badge" title="${esc(relatedNote)}">RELATED</span>` : "";
+  const cardTitle = n.related ? ` title="${esc(n.schema)}.${esc(n.table)} -- ${esc(relatedNote)}"` : "";
+  return `<div xmlns="http://www.w3.org/1999/xhtml" class="${cls}" data-key="${esc(key(n.schema, n.table))}" tabindex="0"${cardTitle}>
+    <div class="erd-table-head">
+      <span class="erd-kind">${esc(n.kind)}</span>
+      ${relatedBadge}
+      <span class="erd-table-name" title="${esc(n.schema)}.${esc(n.table)}">${esc(n.schema)}.${esc(n.table)}</span>
+      ${rowText}
+    </div>
+    <div class="erd-table-body">${cols}</div>
+  </div>`;
+}
+function renderNodes(nodes) {
+  const layer = $("nodes-layer");
+  layer.innerHTML = "";
+  for (const n of nodes) {
+    const k = key(n.schema, n.table);
+    const p = POS[k];
+    const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+    fo.setAttribute("x", p.x); fo.setAttribute("y", p.y);
+    fo.setAttribute("width", p.w); fo.setAttribute("height", p.h);
+    fo.dataset.key = k;
+    fo.innerHTML = cardHtml(n);
+    const cardEl = fo.querySelector(".erd-table");
+    cardEl.addEventListener("pointerdown", e => startCardDrag(e, k));
+    // Keyboard equivalent of a tap: cards are focusable (tabindex="0") but a
+    // pointerdown-based tap never fires for Enter/Space activation.
+    cardEl.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(n); }
+    });
+    fo.addEventListener("mouseenter", () => hoverCard(k, true));
+    fo.addEventListener("mouseleave", () => hoverCard(k, false));
+    layer.appendChild(fo);
+  }
+}
+
+// =============================================================================
+// Edge routing: an orthogonal (elbow) connector between two cards must never cut
+// through a THIRD card's body -- a routing miss reads as "these tables overlap",
+// exactly the artifact caught in review (a connector ran straight through a related,
+// dashed-then-still-legible card). Two things make that provably impossible here
+// rather than merely unlikely for today's fixture:
+//   1. Every candidate segment is tested against every OTHER card's rect (hClear/
+//      vClear below) before it's
+//      accepted; a blocked "natural" elbow falls back to a lane routed below every
+//      card currently on the board, which is clear by construction.
+//   2. This runs against the LIVE POS on every call (initial render AND drag
+//      reflow), not an assumption about the original column/gutter grid -- once a
+//      card is dragged off-grid the obstacle check is what keeps it honest, not a
+//      "the gutters were always empty" hope that stops being true after a drag.
+// =============================================================================
+const SEG_EPS = 0.5;
+function hClear(y, xa, xb, exclude) {
+  const lo = Math.min(xa, xb) + SEG_EPS, hi = Math.max(xa, xb) - SEG_EPS;
+  if (hi <= lo) return true;
+  return !Object.entries(POS).some(([k, r]) => !exclude.has(k) &&
+    y > r.y + SEG_EPS && y < r.y + r.h - SEG_EPS && hi > r.x && lo < r.x + r.w);
+}
+function vClear(x, ya, yb, exclude) {
+  const lo = Math.min(ya, yb) + SEG_EPS, hi = Math.max(ya, yb) - SEG_EPS;
+  if (hi <= lo) return true;
+  return !Object.entries(POS).some(([k, r]) => !exclude.has(k) &&
+    x > r.x + SEG_EPS && x < r.x + r.w - SEG_EPS && hi > r.y && lo < r.y + r.h);
+}
+function segClear(pts, exclude) {
+  for (let i = 1; i < pts.length; i++) {
+    const [x1, y1] = pts[i - 1], [x2, y2] = pts[i];
+    if (Math.abs(x1 - x2) < SEG_EPS) { if (!vClear(x1, y1, y2, exclude)) return false; }
+    else if (!hClear(y1, x1, x2, exclude)) return false;
+  }
+  return true;
+}
+function ptsToPath(pts) { return pts.map((p, i) => (i === 0 ? "M" : "L") + " " + p[0] + " " + p[1]).join(" "); }
+
+// A small rounded loop off the card's right side -- exits and re-enters the same
+// edge with a cubic bezier that only ever bulges OUTWARD (both control points sit
+// further right than either endpoint), so it can never dip back into the card's
+// own body regardless of which fraction of the height it's anchored at.
+function loopPath(a, frac) {
+  const x = a.x + a.w, bulge = 28;
+  const y1 = a.y + a.h * clamp(frac - 0.09, 0.1, 0.8);
+  const y2 = a.y + a.h * clamp(frac + 0.09, 0.2, 0.9);
+  return `M ${x} ${y1} C ${x + bulge} ${y1} ${x + bulge} ${y2} ${x} ${y2}`;
+}
+
+// Route below every card currently on the board -- always obstacle-free by
+// construction for the horizontal leg; the two vertical legs are still checked
+// (a dragged card could sit directly under the source/target) and the lane is
+// pushed down in bounded steps if not. `laneState.n` fans out multiple fallback
+// edges so they don't stack on the exact same lane.
+function fallbackLanePath(a, b, sx, ex, exclude, laneState) {
+  // Below the PAIR being routed, not below the whole board: the component-grid layout
+  // (see layoutErd) packs many unrelated connected components into the same combined
+  // coordinate space, so "the board's bottom" can be thousands of pixels away with a
+  // dozen unrelated cards in between -- a real 69-table schema with lots of separate
+  // components produced exactly that: a fallback lane so far away the obstacle loop
+  // below exhausted its tries and accepted an unclear path straight through other
+  // cards. The pair's own bottom is always close, so the loop below finds a clear
+  // lane in a handful of steps instead of never.
+  const bottom = Math.max(a.y + a.h, b.y + b.h);
+  let lane = bottom + 24 + laneState.n * 14;
+  for (let tries = 0; tries < 24; tries++) {
+    const pts = [[sx, a.y + a.h], [sx, lane], [ex, lane], [ex, b.y + b.h]];
+    if (segClear(pts, exclude)) { laneState.n++; return pts; }
+    lane += 12;
+  }
+  laneState.n++;
+  return [[sx, a.y + a.h], [sx, lane], [ex, lane], [ex, b.y + b.h]]; // last resort, accept it
+}
+
+function elbowPath(a, b, selfLoop, fracA, fracB, exclude, laneState) {
+  if (selfLoop) return loopPath(a, fracA);
+  const acx = a.x + a.w / 2, acy = a.y + a.h * fracA;
+  const bcx = b.x + b.w / 2, bcy = b.y + b.h * fracB;
+  const dx = bcx - acx, dy = bcy - acy;
+
+  function tryHoriz() {
+    const sx = dx >= 0 ? a.x + a.w : a.x, sy = acy;
+    const ex = dx >= 0 ? b.x : b.x + b.w, ey = bcy;
+    const midX = (sx + ex) / 2;
+    const pts = [[sx, sy], [midX, sy], [midX, ey], [ex, ey]];
+    return segClear(pts, exclude) ? pts : null;
+  }
+  function tryVert() {
+    const sx = acx, sy = dy >= 0 ? a.y + a.h : a.y;
+    const ex = bcx, ey = dy >= 0 ? b.y : b.y + b.h;
+    const midY = (sy + ey) / 2;
+    const pts = [[sx, sy], [sx, midY], [ex, midY], [ex, ey]];
+    return segClear(pts, exclude) ? pts : null;
+  }
+  const pts = Math.abs(dx) >= Math.abs(dy) ? (tryHoriz() || tryVert()) : (tryVert() || tryHoriz());
+  const sx = dx >= 0 ? a.x + a.w : a.x, ex = dx >= 0 ? b.x : b.x + b.w;
+  return ptsToPath(pts || fallbackLanePath(a, b, sx, ex, exclude, laneState));
+}
+
+// Multiple edges touching the same card converge on the SAME point (the partner's
+// center) unless told otherwise, which stacks their arrowheads on top of each other.
+// Spread every edge touching a given card evenly across its height instead, whether
+// it's that card's "from" or "to" end.
+function edgeAttachFractions(edges) {
+  const touching = {};
+  edges.forEach((e, i) => {
+    const fk = key(e.from.schema, e.from.table), tk = key(e.to.schema, e.to.table);
+    (touching[fk] = touching[fk] || []).push(i);
+    if (tk !== fk) (touching[tk] = touching[tk] || []).push(i);
+  });
+  const attach = {};
+  Object.entries(touching).forEach(([k, idxs]) => {
+    idxs.forEach((idx, slot) => { attach[`${idx}@${k}`] = (slot + 1) / (idxs.length + 1); });
+  });
+  return attach;
+}
+function renderEdges(edges, nodes) {
+  const layer = $("edges-layer");
+  layer.innerHTML = "";
+  const relatedKeys = new Set(nodes.filter(n => n.related).map(n => key(n.schema, n.table)));
+  const attach = edgeAttachFractions(edges);
+  const laneState = { n: 0 };
+  edges.forEach((e, i) => {
+    const fk = key(e.from.schema, e.from.table), tk = key(e.to.schema, e.to.table);
+    const a = POS[fk], b = POS[tk];
+    if (!a || !b) return; // endpoint outside the current node set (shouldn't happen)
+    const fracA = attach[`${i}@${fk}`] ?? 0.5, fracB = attach[`${i}@${tk}`] ?? 0.5;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const cls = "erd-edge" + ((relatedKeys.has(fk) || relatedKeys.has(tk)) ? " related" : "");
+    path.setAttribute("class", cls);
+    path.setAttribute("marker-start", "url(#erd-many)");
+    path.setAttribute("marker-end", "url(#erd-one)");
+    path.dataset.from = fk; path.dataset.to = tk;
+    path.dataset.fracFrom = fracA; path.dataset.fracTo = fracB;
+    path.setAttribute("d", elbowPath(a, b, fk === tk, fracA, fracB, new Set([fk, tk]), laneState));
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `${e.constraint}: ${fk}.${e.from.column} -> ${tk}.${e.to.column}`;
+    path.appendChild(title);
+    layer.appendChild(path);
+  });
+}
+function reflowEdgesFor(k) {
+  // Called continuously while dragging card `k` -- cheap enough at ERD scale
+  // (<=60 nodes) to just recompute every edge touching it, obstacles and all.
+  const laneState = { n: 0 };
+  document.querySelectorAll(`#edges-layer path[data-from="${CSS.escape(k)}"], ` +
+    `#edges-layer path[data-to="${CSS.escape(k)}"]`).forEach(p => {
+    const a = POS[p.dataset.from], b = POS[p.dataset.to];
+    if (!a || !b) return;
+    const exclude = new Set([p.dataset.from, p.dataset.to]);
+    p.setAttribute("d", elbowPath(a, b, p.dataset.from === p.dataset.to,
+      +p.dataset.fracFrom, +p.dataset.fracTo, exclude, laneState));
+  });
+}
+
+// =============================================================================
+// Pan / zoom. A single transform on #world drives both, so cards and edges
+// (which share its coordinate space) move together with no per-element math.
+// =============================================================================
+function applyView(smooth) {
+  const world = $("world");
+  world.classList.toggle("smooth", !!smooth && !prefersReducedMotion());
+  world.setAttribute("transform", `translate(${VIEW.x},${VIEW.y}) scale(${VIEW.k})`);
+  $("zoom-pct").textContent = Math.round(VIEW.k * 100) + "%";
+}
+function prefersReducedMotion() {
+  return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+function zoomAt(px, py, factor) {
+  USER_ADJUSTED_VIEW = true;
+  const newK = clamp(VIEW.k * factor, MIN_K, MAX_K);
+  const wx = (px - VIEW.x) / VIEW.k, wy = (py - VIEW.y) / VIEW.k;
+  VIEW.k = newK;
+  VIEW.x = px - wx * newK;
+  VIEW.y = py - wy * newK;
+  applyView();
+}
+function viewportCenter() {
+  const r = $("viewport").getBoundingClientRect();
+  return { x: r.width / 2, y: r.height / 2 };
+}
+function zoomStep(dir) { const c = viewportCenter(); zoomAt(c.x, c.y, dir > 0 ? STEP_K : 1 / STEP_K); applyView(true); }
+// "0" / the reset button return to the FITTED view, not a fixed 100% -- fit-to-content
+// is this widget's natural home state (see the fit-by-default note on render()), so
+// resetting to anything else would be a step backwards from what greeted the user on
+// load. Explicitly returning home also clears USER_ADJUSTED_VIEW so a later window
+// resize is allowed to keep it framed (see the resize listener below).
+function resetView() { fitOverview(); }
+function computeBBox(keys) {
+  keys = (keys || Object.keys(POS)).filter(k => POS[k]);
+  if (!keys.length) return { x: 0, y: 0, w: 1, h: 1 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  keys.forEach(k => {
+    const p = POS[k];
+    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + p.h);
+  });
+  return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+}
+// The toolbar (top-right, always) and #chrome-top (the legend and/or chrome-note,
+// top-left, when either is present) float over the top of the canvas -- fitting all
+// the way into that band put the first row's card headers right under that chrome.
+// Reserve whichever actually extends lower as the top inset instead of a flat pad,
+// so the fitted diagram never starts underneath its own chrome. Reading
+// #chrome-top's own rect (rather than checking legend/chrome-note separately)
+// is what keeps this correct whether zero, one, or both notices are visible.
+function topChromeInset(vp) {
+  const bottom = Math.max(document.querySelector(".erd-controls").getBoundingClientRect().bottom,
+    $("chrome-top").getBoundingClientRect().bottom);
+  return Math.max(40, bottom - vp.top + 10);
+}
+// Bottom chrome is the advisory banner (when shown) or the drill-down drawer as a
+// bottom sheet (which sits above, and can fully obscure, the banner) -- reserve the
+// real, live-measured height of whichever is the top-most, or content renders
+// underneath it. As a wide side panel the drawer doesn't touch the bottom edge at
+// all (see detailRightInset below for that case).
+function bottomChromeInset(vp) {
+  const detailEl = $("detail");
+  if (!detailEl.hidden && !detailEl.classList.contains("wide")) {
+    return Math.max(6, vp.bottom - detailEl.getBoundingClientRect().top + 6);
+  }
+  const banner = $("banner");
+  if (!banner.hidden) return Math.max(6, vp.bottom - banner.getBoundingClientRect().top + 6);
+  return 6;
+}
+// The drawer as a WIDE side panel eats into the RIGHT edge instead of the bottom
+// -- fitAll (below) subtracts this from the usable width the same way top/bottom
+// insets are subtracted from usable height.
+function detailRightInset(vp) {
+  const detailEl = $("detail");
+  if (detailEl.hidden || !detailEl.classList.contains("wide")) return 0;
+  return Math.max(0, vp.right - detailEl.getBoundingClientRect().left + 6);
+}
+// Centres `bbox` in the usable canvas (viewport minus every chrome inset) at zoom
+// `kFixed`, or at whatever zoom makes it fit when kFixed is omitted. Shared by the
+// two home views below; returns the zoom it applied. The lower bound here is NOT
+// the same MIN_K manual zoom-out respects: MIN_K exists so a human deliberately
+// zooming out doesn't overshoot into a useless speck, but fit must NEVER be
+// prevented from shrinking enough to guarantee everything is visible -- clamping
+// fit's own scale up to MIN_K was exactly the bug that let cards run off the
+// bottom edge on a small viewport with a large schema.
+const FIT_MIN_K = 0.01, FIT_PAD = 16;
+function usableArea() {
+  const vp = $("viewport").getBoundingClientRect();
+  const top = topChromeInset(vp);
+  return { top, w: vp.width - 2 * FIT_PAD - detailRightInset(vp), // the drawer, as a wide side panel
+    h: vp.height - top - bottomChromeInset(vp) };
+}
+// The zoom at which `bbox` just fits the usable canvas -- compute-only, no view change.
+function fitK(bbox) {
+  const u = usableArea();
+  return clamp(Math.min(u.w / bbox.w, u.h / bbox.h), FIT_MIN_K, MAX_K);
+}
+// Frames `bbox` at zoom `k`: centred horizontally even when wider than the canvas
+// (the interesting middle of a wide component beats its left edge), but never
+// centred vertically past the top inset -- the first row of cards must start BELOW
+// the toolbar, not under it.
+function frame(bbox, k) {
+  const u = usableArea();
+  VIEW.k = k;
+  VIEW.x = FIT_PAD - bbox.x * k + (u.w - bbox.w * k) / 2;
+  VIEW.y = u.top - bbox.y * k + Math.max(0, (u.h - bbox.h * k) / 2);
+  USER_ADJUSTED_VIEW = false;
+  applyView(true);
+}
+// _lastFitK is the zoom of the HOME view currently in effect (overview k after
+// fitAll, MIN_READABLE_K after a readable fit) -- read by the double-tap handler to
+// decide "zoom in" vs. "back home". Tracking the overview k while the readable view
+// was showing made the first double-tap snap OUT to the unreadable overview.
+let _lastFitK = 1;
+// Frames the WHOLE diagram -- an overview, not a legible-text guarantee: a real,
+// large schema (60+ tables) genuinely cannot render readable text on a phone-width
+// canvas. What the Fit button, "f" and "0" do.
+function fitAll() {
+  const full = computeBBox();
+  _lastFitK = fitK(full);
+  frame(full, _lastFitK);
+}
+// The default home view: fit-all, unless that would land below MIN_READABLE_K --
+// then the text is unreadable and the user's first move is always "zoom in and
+// find the interesting bit", so do that for them: MIN_READABLE_K, centred on the
+// largest connected component (MAIN_COMP). The true overview stays one Fit click
+// away.
+const MIN_READABLE_K = 0.8;
+function fitReadable() {
+  const full = computeBBox();
+  if (fitK(full) >= MIN_READABLE_K) { fitAll(); return; }
+  const k = MIN_READABLE_K;
+  frame(computeBBox(MAIN_COMP), k);
+  // Centring on one component must not leave blank canvas on one side while cards
+  // are cropped off the other (or push the first row under the toolbar). Per axis:
+  // if the WHOLE diagram fits at this zoom, centre the whole diagram instead;
+  // otherwise pan back inside its bounds.
+  const u = usableArea();
+  VIEW.x = full.w * k <= u.w ? FIT_PAD - full.x * k + (u.w - full.w * k) / 2
+    : clamp(VIEW.x, FIT_PAD + u.w - (full.x + full.w) * k, FIT_PAD - full.x * k);
+  VIEW.y = full.h * k <= u.h ? u.top - full.y * k + (u.h - full.h * k) / 2
+    : clamp(VIEW.y, u.top + u.h - (full.y + full.h) * k, u.top - full.y * k);
+  _lastFitK = k;
+  applyView(true);
+}
+// Which home view a resize/drawer refit returns to: readable by default, the true
+// overview once the user has explicitly asked for it -- so a resize never yanks
+// someone who chose fit-all back to the readable view (or vice versa).
+let HOME_FIT = fitReadable;
+function fitOverview() { HOME_FIT = fitAll; fitAll(); }
+function refitHome() { if (!USER_ADJUSTED_VIEW && HAS_FITTED_ONCE) HOME_FIT(); }
+// A container resize (the MCP Apps host resizing its iframe, or a plain window resize)
+// invalidates a fit computed against the old viewport size. Only auto-refit while
+// the user is still sitting at the home view they haven't touched yet -- once they
+// pan/zoom manually, a resize should not yank their view back.
+let _resizeTimer = null;
+function scheduleRefit() {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    updateDetailLayout(); // no-op while the drawer is closed -- must run BEFORE the refit
+                          // below, which reads the drawer's up-to-date wide/narrow state
+    refitHome();
+    maybeEmitSizeChanged();
+  }, 120);
+}
+// ResizeObserver on the canvas element itself, NOT a window "resize" listener: an
+// MCP Apps host sizes this widget by resizing its IFRAME to fit a chat transcript
+// column, which doesn't reliably fire the iframe's own window "resize" event in
+// every host/browser combination -- ResizeObserver is the correct signal for "my
+// container changed size" regardless of what caused it (container resize, a host
+// switching display mode, zoom, orientation change, ...), so one observer replaces
+// three different device/window-level signals. Kept in a named variable (not an
+// inline anonymous `new ResizeObserver(...).observe(...)`) so ui/resource-teardown
+// (see teardown() above) can disconnect it.
+const _resizeObserver = new ResizeObserver(scheduleRefit);
+_resizeObserver.observe($("canvas"));
+
+// ---- wheel zoom (about the cursor) + ctrl-wheel trackpad pinch (same handler) ----
+$("viewport").addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = $("viewport").getBoundingClientRect();
+  const factor = Math.exp(-e.deltaY * WHEEL_SENS);
+  zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor);
+}, { passive: false });
+
+// ---- empty-canvas drag pans, dragging a card moves it, two fingers pinch-zoom ----
+// Pointer Events (not separate mouse/touch handlers) cover mouse, touch, and pen with
+// one code path -- touch-action:none (CSS above) stops the browser's own scroll/pinch
+// from ever starting, so these are the only gesture handlers in play. PAN/DRAG below
+// are unchanged from the old mouse-only version; PINCH is new.
+const POINTERS = new Map(); // active pointerId -> {x,y} (viewport-relative)
+let PINCH = null;           // {startDist, startK, worldMid} while >=2 pointers are down
+function viewportPoint(e) {
+  const r = $("viewport").getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+function startPinch() {
+  const pts = [...POINTERS.values()];
+  const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  PINCH = {
+    startDist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+    startK: VIEW.k,
+    worldMid: { x: (mid.x - VIEW.x) / VIEW.k, y: (mid.y - VIEW.y) / VIEW.k },
+  };
+}
+// ---- double-tap / double-click to zoom: one detector for both, since a mouse
+// click and a touch tap are the same PointerEvent shape. A "tap" is a pointer that
+// went down and up again with negligible movement; two of those within 350ms/30px
+// of each other zoom in 2x centred on the tap (or back out to the fit level if
+// already zoomed in past it) -- the explicit "you can zoom in" affordance a
+// legible-overview default needs, per the design decision in fitAll's comment. ----
+let _tapDownAt = null;   // {x, y, t} for the pointer currently down, iff it still looks like a tap
+let _lastTapAt = null;   // {x, y, t} of the most recent completed tap
+const DOUBLE_TAP_MS = 350, DOUBLE_TAP_PX = 30, TAP_MOVE_PX = 10;
+function maybeDoubleTap(clientX, clientY) {
+  const now = Date.now();
+  if (_lastTapAt && now - _lastTapAt.t < DOUBLE_TAP_MS &&
+      Math.hypot(clientX - _lastTapAt.x, clientY - _lastTapAt.y) < DOUBLE_TAP_PX) {
+    _lastTapAt = null;
+    if (VIEW.k > _lastFitK * 1.6) {
+      fitAll();
+    } else {
+      const r = $("viewport").getBoundingClientRect();
+      zoomAt(clientX - r.left, clientY - r.top, 2);
+      applyView(true);
+    }
+  } else {
+    _lastTapAt = { x: clientX, y: clientY, t: now };
+  }
+}
+$("viewport").addEventListener("pointerdown", e => {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  try { $("viewport").setPointerCapture(e.pointerId); } catch (err) { /* best effort */ }
+  POINTERS.set(e.pointerId, viewportPoint(e));
+  _tapDownAt = { x: e.clientX, y: e.clientY, t: Date.now() };
+  if (POINTERS.size >= 2) {
+    _tapDownAt = null; // a pinch is never a tap
+    PAN = null; $("erd-svg").classList.remove("panning");
+    startPinch();
+  } else if (!e.target.closest(".erd-table")) { // card drag handled by startCardDrag
+    PAN = { startX: e.clientX, startY: e.clientY, origX: VIEW.x, origY: VIEW.y };
+    $("erd-svg").classList.add("panning");
+  }
+});
+// Tap vs. drag threshold for opening the drill-down drawer -- see the DRAG.moved
+// tracking in the pointermove handler and its use in endPointer below. Reuses
+// TAP_MOVE_PX (the same movement threshold the double-tap-to-zoom detector uses)
+// so "did this pointer basically not move" means one thing across the widget.
+const CARD_TAP_MAX_MS = 500;
+function startCardDrag(e, k) {
+  e.preventDefault();
+  e.stopPropagation();
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* best effort */ }
+  DRAG = { key: k, startX: e.clientX, startY: e.clientY, origX: POS[k].x, origY: POS[k].y,
+    startT: Date.now(), moved: false };
+  document.querySelector(`#nodes-layer foreignObject[data-key="${CSS.escape(k)}"] .erd-table`)
+    ?.classList.add("dragging");
+}
+function tableNode(k) {
+  return ((DATA && DATA.nodes) || []).find(n => key(n.schema, n.table) === k) || null;
+}
+window.addEventListener("pointermove", e => {
+  if (_tapDownAt && Math.hypot(e.clientX - _tapDownAt.x, e.clientY - _tapDownAt.y) > TAP_MOVE_PX) {
+    _tapDownAt = null; // moved too far to still be a tap -- it's a pan/drag
+  }
+  if (POINTERS.has(e.pointerId)) POINTERS.set(e.pointerId, viewportPoint(e));
+  if (PINCH && POINTERS.size >= 2) {
+    const pts = [...POINTERS.values()];
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+    const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    USER_ADJUSTED_VIEW = true;
+    VIEW.k = clamp(PINCH.startK * (dist / PINCH.startDist), MIN_K, MAX_K);
+    VIEW.x = mid.x - PINCH.worldMid.x * VIEW.k;
+    VIEW.y = mid.y - PINCH.worldMid.y * VIEW.k;
+    applyView();
+  } else if (PAN) {
+    USER_ADJUSTED_VIEW = true;
+    VIEW.x = PAN.origX + (e.clientX - PAN.startX);
+    VIEW.y = PAN.origY + (e.clientY - PAN.startY);
+    applyView();
+  } else if (DRAG) {
+    if (!DRAG.moved && Math.hypot(e.clientX - DRAG.startX, e.clientY - DRAG.startY) > TAP_MOVE_PX) {
+      DRAG.moved = true; // moved past the tap threshold -- this is a drag, not a tap
+    }
+    const dx = (e.clientX - DRAG.startX) / VIEW.k, dy = (e.clientY - DRAG.startY) / VIEW.k;
+    const p = POS[DRAG.key];
+    p.x = DRAG.origX + dx; p.y = DRAG.origY + dy;
+    const fo = document.querySelector(`#nodes-layer foreignObject[data-key="${CSS.escape(DRAG.key)}"]`);
+    fo.setAttribute("x", p.x); fo.setAttribute("y", p.y);
+    reflowEdgesFor(DRAG.key);
+  }
+});
+function endPointer(e) {
+  POINTERS.delete(e.pointerId);
+  if (POINTERS.size < 2) PINCH = null;
+  if (_tapDownAt && POINTERS.size === 0) {
+    maybeDoubleTap(_tapDownAt.x, _tapDownAt.y);
+    _tapDownAt = null;
+  }
+  if (POINTERS.size === 0) {
+    if (PAN) { PAN = null; $("erd-svg").classList.remove("panning"); }
+    if (DRAG) {
+      // A tap opens the drill-down drawer; a drag (moved past TAP_MOVE_PX, or held
+      // too long to be a tap) must NOT -- computed BEFORE DRAG is cleared below.
+      const wasTap = !DRAG.moved && (Date.now() - DRAG.startT) < CARD_TAP_MAX_MS;
+      const tappedKey = DRAG.key;
+      const p = POS[DRAG.key];
+      p.x = Math.round(p.x / GRID) * GRID; p.y = Math.round(p.y / GRID) * GRID; // light snap
+      const fo = document.querySelector(`#nodes-layer foreignObject[data-key="${CSS.escape(DRAG.key)}"]`);
+      fo.setAttribute("x", p.x); fo.setAttribute("y", p.y);
+      fo.querySelector(".erd-table")?.classList.remove("dragging");
+      reflowEdgesFor(DRAG.key);
+      DRAG = null;
+      if (wasTap) {
+        const node = tableNode(tappedKey);
+        if (node) openDetail(node);
+      }
+    }
+  }
+}
+window.addEventListener("pointerup", endPointer);
+window.addEventListener("pointercancel", endPointer);
+
+// ---- hover: highlight a card's edges, dim everything else ----
+function hoverCard(k, on) {
+  document.querySelectorAll("#edges-layer path").forEach(p => {
+    const touches = p.dataset.from === k || p.dataset.to === k;
+    p.classList.toggle("hover", on && touches);
+    p.classList.toggle("dimmed", on && !touches);
+  });
+}
+
+// ---- keyboard: arrows pan, +/- zoom, 0 resets, f fits (ignored while typing) ----
+window.addEventListener("keydown", e => {
+  if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  if (detail) return; // the drawer is open -- its own keydown listener owns Escape/Tab
+  const PAN_STEP = 60;
+  switch (e.key) {
+    case "ArrowLeft": USER_ADJUSTED_VIEW = true; VIEW.x += PAN_STEP; applyView(); break;
+    case "ArrowRight": USER_ADJUSTED_VIEW = true; VIEW.x -= PAN_STEP; applyView(); break;
+    case "ArrowUp": USER_ADJUSTED_VIEW = true; VIEW.y += PAN_STEP; applyView(); break;
+    case "ArrowDown": USER_ADJUSTED_VIEW = true; VIEW.y -= PAN_STEP; applyView(); break;
+    case "+": case "=": zoomStep(1); break;
+    case "-": case "_": zoomStep(-1); break;
+    case "0": resetView(); break;
+    case "f": case "F": fitOverview(); break;
+    default: return;
+  }
+  e.preventDefault();
+});
+
+// ---- search: filters/highlights cards by schema.table name ----
+$("search").addEventListener("input", e => {
+  const q = e.target.value.trim().toLowerCase();
+  const cards = document.querySelectorAll("#nodes-layer .erd-table");
+  let anyMatch = false;
+  cards.forEach(c => {
+    const match = !q || c.dataset.key.toLowerCase().includes(q);
+    c.classList.toggle("search-dim", !!q && !match);
+    c.classList.toggle("search-match", !!q && match);
+    if (match) anyMatch = true;
+  });
+  $("empty-title").textContent = "no tables matched";
+  $("empty-detail").textContent = `Nothing matches "${e.target.value}".`;
+  const showNoMatch = !!q && !anyMatch;
+  // Keep the diagram mounted (so clearing the search restores it instantly) --
+  // just overlay the empty message rather than tearing down the SVG.
+  $("empty").hidden = !showNoMatch;
+  $("viewport").style.visibility = showNoMatch ? "hidden" : "visible";
+});
+
+// designTokens() reads the live theme's custom properties as literal values --
+// used by cardSize() above for font-metric text measurement against whatever
+// font actually rendered.
+function designTokens() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = name => cs.getPropertyValue(name).trim();
+  return {
+    bg: v("--bg"), panel: v("--panel"), panelInset: v("--panel-inset"), ink: v("--ink"),
+    muted: v("--muted"), edge: v("--edge"), blue: v("--blue"), green: v("--green"),
+    yellow: v("--yellow"),
+    fontBrand: v("--font-brand"), fontCaps: v("--font-caps"), fontMono: v("--font-mono"),
+  };
+}
+
+// A generic, visible chrome notice -- currently used only by the Copy Mermaid
+// clipboard-blocked fallback below (showSelectableFallback).
+let _chromeNoteTimer = null;
+function showChromeNote(text, ms) {
+  const el = $("chrome-note");
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(_chromeNoteTimer);
+  _chromeNoteTimer = setTimeout(() => { el.hidden = true; }, ms || 6000);
+}
+
+// ---- copy Mermaid: prefer the server-computed to_mermaid text; fall back to a
+// small client-side equivalent so the button still works on hand-built fixtures ----
+function mermaidText() {
+  if (DATA && typeof DATA.mermaid === "string" && DATA.mermaid) return DATA.mermaid;
+  const lines = ["erDiagram"];
+  (DATA?.nodes || []).forEach(n => {
+    lines.push(`    "${n.schema}.${n.table}" {`);
+    (n.columns || []).forEach(c => {
+      const flags = [c.is_pk ? "PK" : "", c.is_fk ? "FK" : ""].filter(Boolean).join(" ");
+      // Deliberately simple: only serves hand-built fixtures/DATA.nodes without
+      // server-computed DATA.mermaid above; unquoted + sanitized to match
+      // to_mermaid()'s valid syntax.
+      const sanitize = s => (s || "").replace(/[^A-Za-z0-9_]/g, "_");
+      lines.push(`        ${sanitize(c.type) || "unknown"} ${sanitize(c.name)}${flags ? " " + flags : ""}`);
+    });
+    lines.push("    }");
+  });
+  (DATA?.edges || []).forEach(e => {
+    lines.push(`    "${e.from.schema}.${e.from.table}" }o--|| "${e.to.schema}.${e.to.table}" : "${e.constraint}"`);
+  });
+  return lines.join("\n");
+}
+// A visible, already-selected <textarea> overlay -- the honest last resort when
+// neither the Clipboard API nor execCommand("copy") actually copied anything
+// (no clipboard permission is declared on the view, so a sandboxed host may
+// block the write; silently doing nothing would be a button that lies about
+// working, so copy falls back to selectable text).
+function showSelectableFallback(text) {
+  let ta = document.getElementById("mermaid-fallback");
+  if (!ta) {
+    ta = document.createElement("textarea");
+    ta.id = "mermaid-fallback";
+    ta.readOnly = true;
+    ta.setAttribute("aria-label", "Mermaid diagram text -- select all and copy manually");
+    Object.assign(ta.style, {
+      position: "absolute", inset: "15% 10%", zIndex: "10", resize: "none",
+      background: "var(--panel)", color: "var(--ink)", border: "1px solid var(--edge)",
+      borderRadius: "var(--r-md)", padding: ".6rem", font: "12px var(--font-mono)",
+    });
+    ta.addEventListener("blur", () => ta.remove());
+    $("canvas").appendChild(ta);
+  }
+  ta.value = text;
+  ta.focus();
+  ta.select();
+  showChromeNote("Clipboard blocked here -- the text is selected below; copy it manually.", 8000);
+}
+async function copyMermaid() {
+  const text = mermaidText();
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch (e) { /* fall through to the execCommand fallback below */ }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  let copied = false;
+  try { copied = document.execCommand("copy"); } catch (e2) { /* fall through */ }
+  ta.remove();
+  if (!copied) showSelectableFallback(text);
+}
+
+// =============================================================================
+// Drill-down drawer (Task 6.3): tap/click a card (or Enter/Space it, see
+// renderNodes above) to open a drawer of live table detail, fetched over the
+// standard `tools/call` method against exactly three allowlisted tools --
+// get_sample_data, describe_table, get_table_stats. `query` is model-only and is
+// NEVER called from here; arguments always come from the node's own schema/table
+// plus the payload's database, never from free text.
+//
+// `detail` is the single open-drawer state: null when closed, else
+// {node, tab, rows, columns, stats, loading, error, limit}. DETAIL_CACHE is a
+// SEPARATE, session-lifetime cache (survives closing/reopening the drawer) keyed
+// by table+tab(+limit for rows) so re-viewing an already-fetched tab issues no
+// second tools/call.
+// =============================================================================
+let detail = null;
+const DETAIL_CACHE = {};   // cacheKey -> {text} | {error}
+const _detailPending = new Set(); // cacheKeys with a tools/call in flight (dedupe)
+let DETAIL_LIMIT = 10;     // last-used sample-row limit, remembered across tables this session
+const DETAIL_TABS = ["rows", "columns", "stats"];
+
+function cacheKey(tableKey, tab, limit) {
+  return tab === "rows" ? `${tableKey}|rows|${limit}` : `${tableKey}|${tab}`;
+}
+// Only these three tools, called literally (never built from a variable/string
+// concat) so the allowlist is grep-able -- see tests/test_widget_drilldown.py.
+function callDetailTool(tab, node, limit) {
+  const args = { schema: node.schema, table: node.table };
+  if (DATA && DATA.database != null) args.database = DATA.database;
+  if (tab === "rows") {
+    args.limit = limit; // 5/10/20 only -- get_sample_data rejects > 20, see #detail-limit
+    return bridge.call("tools/call", { name: "get_sample_data", arguments: args });
+  }
+  if (tab === "columns") return bridge.call("tools/call", { name: "describe_table", arguments: args });
+  return bridge.call("tools/call", { name: "get_table_stats", arguments: args });
+}
+function extractResultText(result) {
+  if (!result || !Array.isArray(result.content)) return "";
+  const text = result.content.filter(c => c && c.type === "text").map(c => c.text).join("\n");
+  // The drawer's own header already names the table, and the active tab already
+  // says what the section is -- a leading "### ..." markdown heading line is pure
+  // duplication of chrome we already render, so it's dropped once here (cached
+  // clean) rather than shown twice.
+  return text.replace(/^#{1,6}[^\n]*\n+/, "");
+}
+// A host that never advertised serverTools has no way to run a tools/call at
+// all -- checked once per render rather than assumed, per the spec's own
+// graceful-degradation stance the rest of this bridge already follows.
+function serverToolsAvailable() {
+  const caps = bridge.capabilities;
+  return !!(caps && caps.serverTools);
+}
+// What the drawer shows when live data isn't available: everything the ERD
+// payload itself already carries for this node, plus an honest explanation --
+// never a dead tab/limit control pretending it could still do something.
+function detailFallbackText(node) {
+  const lines = [`${node.schema}.${node.table} (${node.kind})`];
+  if (node.rows != null) lines.push(`${fmtRows(node.rows)}`);
+  if (node.description) lines.push(node.description);
+  lines.push("", "Columns (from the diagram data already on screen):");
+  (node.columns || []).forEach(c => {
+    const flag = c.is_pk ? " PK" : c.is_fk ? " FK" : "";
+    lines.push(`- ${c.name}: ${c.type}${c.nullable ? "" : " NOT NULL"}${flag}`);
+  });
+  lines.push("", "Live sample rows, full column detail, and statistics need a host " +
+    "that supports calling server tools; this host did not advertise that capability.");
+  return lines.join("\n");
+}
+function updateTabAria() {
+  DETAIL_TABS.forEach(tab => {
+    $(`detail-tab-${tab}`).setAttribute("aria-selected", String(detail.tab === tab));
+  });
+}
+function updateLimitChrome() {
+  const show = serverToolsAvailable() && detail.tab === "rows";
+  $("detail-limit").hidden = !show;
+  document.querySelectorAll("#detail-limit .erd-detail-limit-btn").forEach(b => {
+    b.setAttribute("aria-pressed", String(show && Number(b.dataset.limit) === detail.limit));
+  });
+}
+// Renders `text` (markdown, split into blocks on blank lines) into the drawer --
+// built with createElement + textContent, never innerHTML, so a table/column name
+// or cell value containing markup can never execute (see the markup comment on
+// #detail-body). A GitHub pipe table (header row, |---| separator row, body rows)
+// becomes a real <table>; a leading "## "/"### " line becomes an <h4>; everything
+// else (prose, the fallback bullet list, a loading/error line) stays a <pre>.
+// Deliberately simple: a table/heading heuristic, not a markdown parser (escaped \|
+// in cells is handled; inline emphasis/links are not). Swap in a real renderer
+// (e.g. `marked`) if it proves too rough.
+function renderDetailBodyText(text) {
+  const body = $("detail-body");
+  body.textContent = ""; // clear previous blocks
+  const el = (tag, txt, parent) => { const e = document.createElement(tag); e.textContent = txt; parent.appendChild(e); return e; };
+  // Split on UNESCAPED pipes only, then unescape -- format.py writes a literal "|"
+  // inside a cell as "\|".
+  const cells = l => l.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/)
+    .map(s => s.trim().replace(/\\\|/g, "|"));
+  (text || "").split(/\n{2,}/).filter(Boolean).forEach(block => {
+    let lines = block.split("\n").filter(l => l.length);
+    if (/^#{2,3} /.test(lines[0])) { el("h4", lines[0].replace(/^#+ /, ""), body); lines = lines.slice(1); }
+    if (!lines.length) return;
+    const isTable = lines.length > 1 && lines.every(l => l.trim().startsWith("|")) &&
+      cells(lines[1]).every(c => /^:?-{3,}:?$/.test(c));
+    if (!isTable) { el("pre", lines.join("\n"), body); return; }
+    const table = el("table", "", body);
+    table.className = "erd-detail-table";
+    const row = (parent, tag, vals) => { const tr = el("tr", "", parent); vals.forEach(v => el(tag, v, tr)); };
+    row(table.createTHead(), "th", cells(lines[0]));
+    const tbody = table.createTBody();
+    lines.slice(2).forEach(l => row(tbody, "td", cells(l)));
+  });
+}
+function renderDetail() {
+  if (!detail) return;
+  const node = detail.node;
+  $("detail-title").textContent = `${node.schema}.${node.table}`;
+  const available = serverToolsAvailable();
+  document.querySelector(".erd-detail-tabs").hidden = !available;
+  updateTabAria();
+  updateLimitChrome();
+
+  if (!available) {
+    renderDetailBodyText(detailFallbackText(node));
+  } else if (detail.loading) {
+    renderDetailBodyText("Loading…");
+  } else if (detail.error) {
+    renderDetailBodyText(`⚠️ ${detail.error}`);
+  } else {
+    renderDetailBodyText(detail[detail.tab] || "");
+  }
+}
+function applyDetailResult(tab, tableKey, limit, cached) {
+  // Guard against a stale async response landing after the user switched tabs,
+  // switched tables, or changed the limit -- only apply if still relevant.
+  if (!detail || detail.tab !== tab || key(detail.node.schema, detail.node.table) !== tableKey ||
+      (tab === "rows" && detail.limit !== limit)) return;
+  detail.loading = false;
+  if (cached.error) { detail.error = cached.error; detail[tab] = null; }
+  else { detail.error = null; detail[tab] = cached.text; }
+  renderDetail();
+}
+async function fetchDetailTab(tab) {
+  if (!detail) return;
+  const node = detail.node, tableKey = key(node.schema, node.table), limit = detail.limit;
+  const ck = cacheKey(tableKey, tab, limit);
+  if (DETAIL_CACHE[ck]) { applyDetailResult(tab, tableKey, limit, DETAIL_CACHE[ck]); return; }
+  if (_detailPending.has(ck)) return; // already in flight -- don't double-call
+  _detailPending.add(ck);
+  detail.loading = true; detail.error = null;
+  renderDetail();
+  try {
+    const result = await callDetailTool(tab, node, limit);
+    DETAIL_CACHE[ck] = { text: extractResultText(result) };
+  } catch (err) {
+    DETAIL_CACHE[ck] = { error: (err && err.message) ? err.message : String(err) };
+  } finally {
+    _detailPending.delete(ck);
+  }
+  applyDetailResult(tab, tableKey, limit, DETAIL_CACHE[ck]);
+}
+function selectDetailTab(tab) {
+  if (!detail) return;
+  detail.tab = tab;
+  renderDetail();
+  if (!serverToolsAvailable()) return; // fallback already shown by renderDetail
+  const ck = cacheKey(key(detail.node.schema, detail.node.table), tab, detail.limit);
+  if (DETAIL_CACHE[ck]) { applyDetailResult(tab, key(detail.node.schema, detail.node.table), detail.limit, DETAIL_CACHE[ck]); return; }
+  fetchDetailTab(tab);
+}
+// The drawer is chrome, exactly like the toolbar/banner it overlaps -- opening
+// it shrinks the usable canvas (a bottom band on a narrow container, a right
+// column on a wide one) and closing it gives that space back. Re-fit through the
+// same guarded path a container resize already uses (only while the user hasn't
+// manually panned/zoomed -- see scheduleRefit's own comment) so a deliberate user
+// view is never yanked, but the common case (open a card fresh, or close back to
+// the full diagram) reflows instead of leaving the diagram squeezed into a sliver.
+function refitForDetailChange() {
+  refitHome();
+  maybeEmitSizeChanged();
+}
+function openDetail(node) {
+  detail = { node, tab: "rows", rows: null, columns: null, stats: null,
+    loading: false, error: null, limit: DETAIL_LIMIT };
+  $("detail").hidden = false;
+  updateDetailLayout();
+  refitForDetailChange();
+  selectDetailTab("rows");
+  $("detail-close").focus();
+}
+function closeDetail() {
+  if (!detail) return;
+  const tableKey = key(detail.node.schema, detail.node.table);
+  $("detail").hidden = true;
+  detail = null;
+  refitForDetailChange();
+  document.querySelector(`.erd-table[data-key="${CSS.escape(tableKey)}"]`)?.focus();
+}
+// Bottom sheet vs. side panel: ONE component, positioned by measuring the actual
+// container (not a CSS @media breakpoint -- that mode-switch was deliberately
+// deleted from this widget already, see the control-bar comment above). Called on
+// open and from scheduleRefit() so a host resizing the iframe (including entering
+// fullscreen) keeps the drawer correctly shaped.
+const DETAIL_WIDE_MIN_PX = 640;
+function updateDetailLayout() {
+  if ($("detail").hidden) return;
+  $("detail").classList.toggle("wide", $("canvas").getBoundingClientRect().width >= DETAIL_WIDE_MIN_PX);
+}
+DETAIL_TABS.forEach(tab => $(`detail-tab-${tab}`).addEventListener("click", () => selectDetailTab(tab)));
+document.querySelectorAll("#detail-limit .erd-detail-limit-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (!detail) return;
+    const lim = Number(btn.dataset.limit);
+    if (lim === detail.limit) return;
+    detail.limit = lim; DETAIL_LIMIT = lim;
+    fetchDetailTab("rows"); // hits the cache if this table was already fetched at this limit
+  });
+});
+$("detail-close").addEventListener("click", closeDetail);
+// Escape closes; Tab is trapped inside the drawer while it's open (aria-modal="true"
+// promises exactly that to assistive tech). The pan/zoom keydown handler above
+// already bails out early whenever `detail` is set, so there's no double-handling.
+document.addEventListener("keydown", e => {
+  if (!detail) return;
+  if (e.key === "Escape") { closeDetail(); e.preventDefault(); return; }
+  if (e.key !== "Tab") return;
+  const focusable = Array.from($("detail").querySelectorAll(
+    'button:not([hidden]):not([disabled]), [tabindex]:not([tabindex="-1"])'));
+  if (!focusable.length) return;
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+  else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+});
+
+// ---- wire up the control cluster ----
+$("zoom-in").addEventListener("click", () => zoomStep(1));
+$("zoom-out").addEventListener("click", () => zoomStep(-1));
+$("fit").addEventListener("click", fitOverview);
+$("fullscreen").addEventListener("click", requestFullscreen);
+$("copy-mermaid").addEventListener("click", copyMermaid);
+
+boot();
+</script>
+</body>
+</html>

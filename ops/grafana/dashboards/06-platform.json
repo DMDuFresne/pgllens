@@ -1,0 +1,275 @@
+{
+  "uid": "pgllens-platform",
+  "title": "Platform",
+  "tags": ["pgllens", "platform"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "timezone": "",
+  "links": [
+    {
+      "type": "dashboards",
+      "tags": ["pgllens"],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "title": "pgllens dashboards",
+      "icon": "external link",
+      "targetBlank": false,
+      "url": "",
+      "tooltip": ""
+    }
+  ],
+  "templating": { "list": [] },
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "type": "dashboard",
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "-- Grafana --" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": null,
+      "title": "About",
+      "type": "text",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "The machine and the observability stack itself, not pgllens. Host panels come from **node-exporter**, container panels from **cAdvisor** -- both are in the `infra` compose profile. On a Windows Docker host neither works fully: node-exporter cannot run at all (the three `node_*` panels read No data), and cAdvisor only sees the root cgroup, so the two per-container panels have no `name` label to match. That is the host, not a broken dashboard."
+      }
+    },
+    {
+      "id": null,
+      "title": "Host CPU",
+      "description": "Fraction of host CPU in use, as 1 minus the average idle rate across cores. From node-exporter (`infra` profile; No data on a Windows host).",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 3 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "legendFormat": "cpu used"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Host memory used",
+      "description": "Fraction of host RAM unavailable to new work, as 1 minus MemAvailable/MemTotal. MemAvailable, not MemFree, so reclaimable page cache is not counted as used. From node-exporter.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 3 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+          "legendFormat": "memory used"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Disk free by mount",
+      "description": "Fraction free per real filesystem. tmpfs/overlay/squashfs are excluded -- they are RAM or image layers, not the disk Prometheus and Loki fill. From node-exporter.",
+      "type": "bargauge",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.15 }, { "color": "green", "value": 0.3 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"}",
+          "legendFormat": "{{mountpoint}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Container memory",
+      "description": "Working-set memory per pgllens stack container, from cAdvisor. Working set is the resident memory the kernel cannot reclaim under pressure -- this is what the OOM killer looks at.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\"pgllens.*\"})",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Container restarts (1h)",
+      "description": "1 for each stack container whose start time moved in the last hour, i.e. it restarted. A row at 1 that you did not cause is worth a `docker logs` before anything else on this page.",
+      "type": "table",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "instant": true,
+          "format": "table",
+          "expr": "sum by (name) (increase(container_start_time_seconds{name=~\"pgllens.*\"}[1h]) > bool 0)"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true } } }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Prometheus TSDB size",
+      "description": "On-disk size of the Prometheus block storage. Grows until the retention window is full, then plateaus; a straight line up past that means retention is not being enforced.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "prometheus_tsdb_storage_blocks_bytes"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Loki ingest rate",
+      "description": "Bytes per second arriving at the Loki distributor from every source (audit log plus container logs). Flat zero while the stack is logging means Alloy is not shipping.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(loki_distributor_bytes_received_total[5m]))",
+          "legendFormat": "received"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Alloy audit bytes read",
+      "description": "Bytes per second Alloy is reading out of the pgllens audit log file. This is the input side of the AuditShippingStalled alert -- zero here while tool calls are happening is the failure it watches for.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(loki_source_file_read_bytes_total[5m])",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Tempo spans received",
+      "description": "Spans per second reaching the Tempo distributor. Non-zero only when PGLLENS_TRACING_ENABLED is on and the observability extra is installed.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(tempo_distributor_spans_received_total[5m]))",
+          "legendFormat": "spans/s"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Scrape targets",
+      "description": "Every Prometheus scrape target and whether its last scrape succeeded. A DOWN row here explains most No data panels elsewhere; a target that is absent entirely means its compose profile is not running.",
+      "type": "table",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 },
+      "fieldConfig": {
+        "defaults": { "unit": "none" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "instant": true,
+          "format": "table",
+          "expr": "up"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true } } }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Stack container logs",
+      "description": "warn/error lines from every container in the stack, shipped by Alloy's Docker discovery. The first place to look when a panel above goes No data.",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 43 },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=\"pgllens-docker\", level=~\"warn|warning|error\"}"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+* text=auto
+*.sh text eol=lf
+*.alloy text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf

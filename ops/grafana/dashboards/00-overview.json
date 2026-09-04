@@ -1,0 +1,298 @@
+{
+  "uid": "pgllens-overview",
+  "title": "Overview",
+  "tags": ["pgllens", "overview"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "timezone": "",
+  "links": [
+    {
+      "type": "dashboards",
+      "tags": ["pgllens"],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": true,
+      "title": "pgllens dashboards",
+      "icon": "external link",
+      "targetBlank": false,
+      "url": "",
+      "tooltip": ""
+    }
+  ],
+  "templating": { "list": [] },
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "type": "dashboard",
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "-- Grafana --" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": null,
+      "title": "pgllens",
+      "description": "Prometheus scrape health for the pgllens server itself. DOWN means /metrics did not answer the last scrape -- the server is stopped, unreachable, or the observability extra is not installed.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up{job=\"pgllens\"}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Database",
+      "description": "PostgreSQL reachability as reported by postgres_exporter (`pg_up`). Requires the `infra` compose profile -- without it postgres_exporter is not running and this tile shows No data rather than DOWN.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "pg_up",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Calls / min",
+      "description": "MCP tool calls per minute across all 31 tools, from a 5m rate window. Zero is normal for an idle server -- nothing polls the tools.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(pgllens_tool_calls_total[5m])) * 60"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Rejections (1h)",
+      "description": "Tool calls the read-only SQL gate refused in the last hour. Counter delta measured as max_over_time minus min_over_time so a counter reset does not hide the rejections.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(max_over_time(pgllens_tool_calls_total{outcome=\"rejected\"}[1h])) - sum(min_over_time(pgllens_tool_calls_total{outcome=\"rejected\"}[1h]))",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Active alerts",
+      "description": "Prometheus alert rules currently firing, excluding the always-on Watchdog. Click through to Alertmanager for the detail; `or vector(0)` keeps the tile at 0 instead of No data when nothing is firing.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(ALERTS{alertstate=\"firing\", alertname!=\"Watchdog\"}) or vector(0)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Disk free",
+      "description": "Fraction free on the tightest real filesystem, from node-exporter. tmpfs/overlay/squashfs are excluded because they are not the disk that fills up. Needs node-exporter, which cannot run on a Windows Docker host -- No data there is expected.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 0.15 }, { "color": "green", "value": 0.3 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "min(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"})",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Tool call rate by outcome",
+      "description": "Per-second tool-call rate, split by outcome, over a 5m window. A rising `rejected` line means the read-only gate is refusing SQL; `db_error` means PostgreSQL rejected it.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ok" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "rejected" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "db_error" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "unknown_schema" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "not_found" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome) (rate(pgllens_tool_calls_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "p95 tool latency",
+      "description": "95th-percentile wall-clock duration across all tools, from the `pgllens_tool_call_duration_seconds` histogram. Includes the PostgreSQL round-trip and markdown formatting.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pgllens_tool_call_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Calls (10m)",
+      "description": "Tool calls in the last 10 minutes. If the left is non-zero and the right is zero, AuditShippingStalled will fire.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(pgllens_tool_calls_total[10m]))",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Audit bytes shipped (10m)",
+      "description": "Bytes Alloy read out of the audit log and shipped to Loki in the last 10 minutes. If the left is non-zero and the right is zero, AuditShippingStalled will fire.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(loki_source_file_read_bytes_total[10m]))",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Recent rejections and errors",
+      "description": "Every audited tool call whose outcome was not `ok`, newest first. Lines carry tool, outcome, duration_ms, sub, client_id and args_hash -- never SQL text or a schema name.",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=\"pgllens-audit\", event=\"tool_call\"} | json | outcome != `ok`"
+        }
+      ]
+    }
+  ]
+}

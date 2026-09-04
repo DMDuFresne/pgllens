@@ -1,0 +1,12 @@
+# ops/alertmanager/alertmanager.null.yml
+# Selected by entrypoint.sh when SLACK_WEBHOOK_URL is empty. Alerts are visible in
+# the Alertmanager UI (:9093) and Grafana, but nothing leaves the box.
+route:
+  receiver: "null"
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: "null"

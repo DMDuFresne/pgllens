@@ -1,0 +1,58 @@
+pgllens — Copyright 2026 Abelara — licensed under Apache-2.0 (see LICENSE).
+
+================================================================================
+Third-party runtime dependencies
+================================================================================
+
+The following packages are included as runtime dependencies. Licenses were
+verified from installed package metadata (dist-info).
+
+  mcp — MIT
+  pydantic — MIT
+  pydantic-settings — MIT
+  uvicorn — BSD-3-Clause
+  starlette — BSD-3-Clause
+  psycopg[binary,pool] — GNU LGPL v3
+  prometheus-client — Apache-2.0
+  opentelemetry-api — Apache-2.0
+  opentelemetry-sdk — Apache-2.0
+  opentelemetry-exporter-otlp-proto-grpc — Apache-2.0
+  opentelemetry-instrumentation-asgi — Apache-2.0
+
+The observability extras (prometheus-client, opentelemetry-*) are optional
+and guard all imports behind runtime availability checks; the server runs
+without them if absent.
+
+================================================================================
+Trademarks
+================================================================================
+
+This project is an independent work. It is not affiliated with, endorsed,
+sponsored, or supported by the PostgreSQL Global Development Group or the
+PostgreSQL Community Association of Canada. PostgreSQL and the PostgreSQL
+elephant logo ("Slonik") are trademarks or registered trademarks of the
+PostgreSQL Community Association of Canada, used nominatively, solely to
+identify the database pgllens interoperates with. TimescaleDB is a trademark
+of Timescale, Inc., used nominatively for the same reason. No trademark
+license is granted or implied.
+
+================================================================================
+Abelara brand assets
+================================================================================
+
+The Abelara name, the Abelara logo and logo mark, and all other Abelara brand artwork
+(including the icon-illustration set in the Abelara brand book) are trademarks and
+copyright of Abelara. All rights reserved. The Abelara logo mark embedded inline in this
+repository's design/widget surfaces (see src/pgllens/design/brand.py) is included for
+product identification only and is expressly NOT licensed under the Apache-2.0 license
+that covers this repository's code and documentation. Distribution of this software
+grants no license to use Abelara trade names, trademarks, or brand artwork (see also
+Apache-2.0, Section 6).
+
+================================================================================
+Disclaimer
+================================================================================
+
+pgllens is provided "AS IS", without warranty of any kind, and the authors
+and contributors accept no responsibility or liability for any use of it (see
+LICENSE, Apache-2.0 Sections 7 and 8).

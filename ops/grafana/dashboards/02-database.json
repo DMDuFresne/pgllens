@@ -1,0 +1,93 @@
+{
+  "uid": "pgllens-database",
+  "title": "Database",
+  "tags": ["pgllens", "database"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "timezone": "",
+  "templating": { "list": [] },
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "type": "dashboard",
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "-- Grafana --" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": null,
+      "title": "About",
+      "type": "text",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "The PostgreSQL round-trip: connection health and per-query latency. `pgllens_query_duration_seconds` covers connect+execute+fetch for every `run_readonly`/`run_system`/`run_plan` call; connection errors are counted separately since a slow query and a failed connection need different responses."
+      }
+    },
+    {
+      "id": null,
+      "title": "Query duration (p50/p95)",
+      "description": "Median and 95th-percentile PostgreSQL round-trip (connect + execute + fetch) for every run_readonly/run_system/run_plan call.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(pgllens_query_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pgllens_query_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Connection errors",
+      "description": "New connection failures in the last 5m. Non-zero means the pool could not reach PostgreSQL -- a different problem from a slow query.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "increase(pgllens_connection_errors_total[5m])",
+          "legendFormat": "connection errors"
+        }
+      ]
+    },
+    {
+      "id": null,
+      "title": "Schema-introspection cache hit ratio",
+      "description": "Fraction of pg_catalog introspection lookups served from the in-process cache over 15m. A sustained drop means refresh_schema is being called, or the cache TTL is too short.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 13 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(pgllens_schema_cache_hits_total[15m])) / (sum(rate(pgllens_schema_cache_hits_total[15m])) + sum(rate(pgllens_schema_cache_misses_total[15m])))",
+          "legendFormat": "hit ratio"
+        }
+      ]
+    }
+  ]
+}

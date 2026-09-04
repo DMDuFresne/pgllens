@@ -118,11 +118,13 @@ clients). Supported databases and hosts: [`docs/DEPLOY.md#compatibility`](docs/D
 
 ### Skills
 
-`skills/` bundles four [Claude skills](https://docs.claude.com/en/docs/claude-code/skills)
-(`pgllens-using`, `pgllens-explore-a-database`, `pgllens-tune-a-query`, `pgllens-health-check`)
-that teach Claude how to drive PgLLens. Start with `pgllens-using` (read-only posture, house rules,
-routing to the other three); copy the directories into your project's `.claude/skills/`
-and Claude Code picks the right one from each skill's trigger phrases.
+`skills/` bundles eight [Claude skills](https://docs.claude.com/en/docs/claude-code/skills)
+(`pgllens-using`, `pgllens-explore-a-database`, `pgllens-write-a-query`, `pgllens-tune-a-query`,
+`pgllens-health-check`, `pgllens-triage-an-incident`, `pgllens-document-a-schema`,
+`pgllens-verify-a-deployment`) that teach Claude how to drive PgLLens. Start with `pgllens-using`
+(read-only posture, house rules, routing to the other seven); copy the directories into your
+project's `.claude/skills/` and Claude Code picks the right one from each skill's trigger phrases.
+See [`skills/README.md`](skills/README.md) for the index.
 
 ## Tools
 

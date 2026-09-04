@@ -25,7 +25,7 @@ report for the operator to act on, not a change pgllens made.
    (tuning `autovacuum` settings, or a manual `VACUUM`) is cheap relative to letting it compound.
 3. **`get_blocking`** — current blocking chains as a query-pair list (blocked session and query,
    the blocker(s), and how long the blocked session has waited), built from
-   `pg_blocking_pids()`. `"No blocking detected."` means nothing is blocked *right now* — this
+   `pg_blocking_pids()`. `0 blocked sessions` means nothing is blocked *right now* — this
    is a point-in-time read, not a history, so a clean result doesn't rule out intermittent
    blocking.
 4. **`get_wait_stats`** — active sessions grouped by `wait_event_type`/`wait_event` with a

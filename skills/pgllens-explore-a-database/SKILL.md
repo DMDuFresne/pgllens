@@ -12,7 +12,7 @@ anything, so explore freely. The goal is to understand what the schema *means*, 
 it's shaped like, before writing SQL against it.
 
 **REQUIRED BACKGROUND:** read pgllens-using first for the `schema` argument, the exposed-schema
-allowlist, the house rules (soft-delete filtering, UoM grouping, view-first), and the
+allowlist, the house rules (view-first, convention-aware filtering, unit-aware aggregation), and the
 structure-vs-meaning distinction between `describe_table` and `get_ontology`.
 
 ## Workflow
@@ -22,8 +22,9 @@ structure-vs-meaning distinction between `describe_table` and `get_ontology`.
 2. **Meaning first.** `get_ontology` (optionally scoped with `schema`) — which tables are hubs
    (most referenced), how tables connect, and naming conventions in use (soft delete, audit
    columns, lookup tables, junction tables), plus any operator-supplied domain context. **Read
-   this before guessing at semantics.** A `removed_at` column across several tables tells you
-   soft-delete is the convention throughout, not just on the one table you happened to look at.
+   this before guessing at semantics.** A convention the ontology reports across several
+   tables (a soft-delete marker, say) holds throughout the schema, not just on the one table
+   you happened to look at.
    Guessing from a column name alone (`flag`, `type`, `status`) is how wrong answers happen —
    the ontology exists precisely to stop that.
 3. **Structure.** `describe_table` for the specific tables that matter — columns, types,
@@ -50,8 +51,8 @@ structure-vs-meaning distinction between `describe_table` and `get_ontology`.
    call those tools yourself when you need the data for your own reasoning (writing a query,
    answering a question) rather than the user's own browsing.
 5. **Sample data.** `get_sample_data` (up to 1000 unfiltered rows, default 10) — confirms your
-   read of the ontology against what's actually stored. A naming convention says `removed_at`
-   marks soft-deleted rows; sample data confirms non-null values actually show up there.
+   read of the ontology against what's actually stored. If the ontology reports a soft-delete
+   convention, confirm with sample data that the marker column actually carries non-null values.
 6. **Stats.** `get_table_stats` — row count plus per-column null count/percentage and distinct
    count, batched into one query where possible (falls back to one query per column for a
    json/xml column that can't support `COUNT(DISTINCT)`). Useful for judging cardinality (is
@@ -65,10 +66,10 @@ schema at once. Faster and more reliable than paging through `list_tables` outpu
 
 ## Programmable objects
 
-If the schema exposes business logic through views rather than raw tables (and `v_*` views
-usually do, per the house rules in pgllens-using), `get_view_definition` shows the view's full
-SQL and column listing — often the fastest way to learn how a set of tables is meant to be
-joined, including the soft-delete and UoM handling it may already do for you. `list_functions`
+If the schema exposes business logic through views, read their definitions before
+reimplementing the join: `get_view_definition` shows the view's full SQL and column listing,
+often the fastest way to learn how a set of tables is meant to be joined, and a view may
+already apply the filters and conversions the ontology describes. `list_functions`
 lists stored functions with parameters, return type, volatility, and comment; `get_function_source`
 shows the full definition, including all overloads.
 

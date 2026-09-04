@@ -104,7 +104,7 @@
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "instant": true,
           "format": "table",
-          "expr": "max by (tool, outcome) (max_over_time(pgllens_tool_calls_total{outcome!=\"ok\", tool=~\"$tool\"}[1h]))"
+          "expr": "max by (tool, outcome) (max_over_time(pgllens_tool_calls_total{outcome!=\"ok\", tool=~\"$tool\"}[1h])) > 0"
         }
       ]
     }

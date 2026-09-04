@@ -229,6 +229,42 @@ them (`http://localhost:9093/#/alerts`), and `SLACK_WEBHOOK_URL` is set and vali
 `Watchdog`; if it is expected to be quiet because the `observe` profile is intentionally stopped,
 that is the profile being down, not a silence.
 
+## Platform dashboard: container panels read No data
+
+"Container memory" and "Container restarts (1h)" are empty while the host CPU/memory/disk panels
+work. cAdvisor sees only the root cgroup. Two known triggers: Windows Docker Desktop hosts, and
+Linux hosts where Docker uses the containerd image store (check with `docker info | grep
+driver-type`; Docker Engine 29 uses `io.containerd.snapshotter.v1` by default). cAdvisor 0.52 logs
+`failed to identify the read-write layer ID for container` for every container in that mode.
+
+Options: accept the two empty panels (nothing else is affected), or switch Docker back to the
+classic overlay2 image store in `/etc/docker/daemon.json`
+(`"features": {"containerd-snapshotter": false}`), which re-pulls every image and takes the stack
+down for a few minutes. Not a pgllens issue.
+
+## Traces dashboard shows "<root span not yet received>"
+
+Every tool-call trace in the Traces (Tempo) dashboard has an empty Service/Name and reads
+`<root span not yet received>`, while `GET /health` and `GET /metrics` traces look normal. The MCP
+client (for example the claude.ai connector) sends a W3C `traceparent` header, so the `POST /mcp`
+server span is a child of a span that lives in the caller's infrastructure and never reaches Tempo.
+The pgllens spans (`POST /mcp`, `tools/call <name>`) are complete; only the remote root is missing.
+Cosmetic.
+
+The "Slow traces" panel excludes `subscriptions/listen` long-polls, which are multi-minute by
+design. Multi-minute traces anywhere else are worth a look.
+
+Related noise: the Platform dashboard's "Stack container logs" panel filters out Tempo's
+`level=error ... "no jobs found"` line, which Tempo 3.0's backend worker emits about once a minute
+in monolithic mode when its backend scheduler has no compaction jobs. Benign.
+
+## "Prometheus TSDB size" reads 0 B
+
+The panel plots `prometheus_tsdb_storage_blocks_bytes`, which counts only persisted blocks.
+Prometheus cuts its first block roughly two to three hours after start, so a fresh stack shows 0 B
+even though the head is holding data (check `prometheus_tsdb_head_series`, or `du` on the
+prometheus-data volume). It fills in on its own.
+
 ## `get_table_health` flags xid age or a sequence near its limit
 
 **xid age above 75% of `autovacuum_freeze_max_age`.** Autovacuum has not frozen the table's old

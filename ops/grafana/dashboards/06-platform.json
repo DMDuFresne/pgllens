@@ -43,7 +43,7 @@
       "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "The machine and the observability stack itself, not pgllens. Host panels come from **node-exporter**, container panels from **cAdvisor** -- both are in the `infra` compose profile. On a Windows Docker host neither works fully: node-exporter cannot run at all (the three `node_*` panels read No data), and cAdvisor only sees the root cgroup, so the two per-container panels have no `name` label to match. That is the host, not a broken dashboard."
+        "content": "The machine and the observability stack itself, not pgllens. Host panels come from **node-exporter**, container panels from **cAdvisor** -- both are in the `infra` compose profile. On a Windows Docker host neither works fully: node-exporter cannot run at all (the three `node_*` panels read No data), and cAdvisor only sees the root cgroup, so the two per-container panels have no `name` label to match. The same happens on any Linux host where Docker uses the containerd image store (`docker info` shows `driver-type: io.containerd.snapshotter.v1`, the Docker Engine 29 default): cAdvisor 0.52 cannot resolve container layers there and logs `failed to identify the read-write layer ID`. That is the host, not a broken dashboard."
       }
     },
     {
@@ -267,7 +267,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{job=\"pgllens-docker\", level=~\"warn|warning|error\"}"
+          "expr": "{job=\"pgllens-docker\", level=~\"warn|warning|error\"} != \"no jobs found\""
         }
       ]
     }

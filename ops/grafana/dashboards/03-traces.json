@@ -81,7 +81,7 @@
     {
       "id": null,
       "title": "Slow traces (> 500ms)",
-      "description": "Traces whose root/any span exceeds 500ms -- useful for spotting a slow query or a slow explain.",
+      "description": "Tool-call spans over 500 ms -- useful for spotting a slow query or a slow explain. The MCP transport's `POST /mcp` and `subscriptions/listen` long-poll spans are multi-minute by design and excluded.",
       "type": "table",
       "datasource": { "type": "tempo", "uid": "tempo" },
       "gridPos": { "h": 10, "w": 12, "x": 12, "y": 15 },
@@ -95,7 +95,7 @@
           "refId": "A",
           "datasource": { "type": "tempo", "uid": "tempo" },
           "queryType": "traceql",
-          "query": "{resource.service.name=\"pgllens\" && duration>500ms}",
+          "query": "{resource.service.name=\"pgllens\" && name=~\"tools/call.*\" && duration>500ms}",
           "tableType": "traces",
           "limit": 20
         }

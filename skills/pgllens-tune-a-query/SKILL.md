@@ -37,8 +37,8 @@ a recommendation an operator has to act on; pgllens reports, it does not remedia
    list). Treat an unused index as a lead to verify against the actual query pattern, not a
    prescription to drop blindly — a low-traffic index can still be the one this exact query
    needs and simply hasn't been exercised yet in the sampled window.
-4. **Aggregate statement stats.** `get_query_store` (named for parity with the tool this ported
-   from; PostgreSQL's actual mechanism is the `pg_stat_statements` extension) reports the top
+4. **Aggregate statement stats.** `get_query_store` (the name is historical; PostgreSQL's mechanism is
+   the `pg_stat_statements` extension) reports the top
    tracked statements by `order_by` (`total_time`, `mean_time`, `calls`, or `rows`; default
    `total_time`), with call count, total/mean execution time, rows produced, and shared-buffer
    hit/read counts. Needs the `pg_stat_statements` extension — if it's not installed, the tool
